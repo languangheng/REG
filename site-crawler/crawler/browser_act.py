@@ -19,6 +19,7 @@ class BrowserActClient:
         self.session = session
         self.browser_id = browser_id
         self._cmd = self._find_cli()
+        self._cookie_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tmp", "cookies")
 
     @staticmethod
     def _find_cli() -> str:
@@ -102,6 +103,10 @@ class BrowserActClient:
     def ensure_session(self, url: str = "", max_wait_cf: int = 60) -> "StateSnapshot":
         """确保会话可用。优先复用已有 session，避免不必要的 browser open（减少 CF 触发）。
 
+        Cookie 自动复用：
+        - session 重建时，navigate 前自动导入已保存的 Cookie → 可能跳过 CF 验证
+        - CF 通过后，自动导出 Cookie → 供下次复用
+
         检测优先级：
         1. session list 检查 session name 是否存活（最可靠）
         2. parsed_state() 验证页面可用（次要）
@@ -129,6 +134,13 @@ class BrowserActClient:
                 raise RuntimeError("没有可用的浏览器")
             if url:
                 self._run("browser", "open", bid, url, timeout=60)
+                # session 重建后，导入已保存的 Cookie，刷新页面可能跳过 CF
+                self.load_cookies(url)
+                # 导入 Cookie 后刷新页面，让 Cookie 生效
+                try:
+                    self._run("reload", timeout=30)
+                except RuntimeError:
+                    pass
             else:
                 raise RuntimeError("需要提供 url 来重建会话")
 
@@ -139,6 +151,9 @@ class BrowserActClient:
                 snap = self.parsed_state()
                 t = snap.title.lower()
                 if "moment" not in t and "稍候" not in t and "verify" not in t and "checking" not in t:
+                    # CF 通过，自动保存 Cookie 供下次复用
+                    if url:
+                        self.save_cookies(url)
                     return snap
             except RuntimeError:
                 continue
@@ -284,6 +299,40 @@ class BrowserActClient:
     def cookies_import(self, filepath: str) -> str:
         """从文件导入 Cookie。"""
         return self._run("cookies", "import", filepath, timeout=10)
+
+    def save_cookies(self, url: str = "") -> str:
+        """导出当前页面 Cookie 到本地文件（按域名存储）。
+
+        Cookie 文件保存到 tmp/cookies/{domain}.json。
+
+        Args:
+            url: 当前页面 URL，用于提取域名作为文件名。
+
+        Returns:
+            Cookie 文件路径。
+        """
+        domain = urlparse(url).hostname if url else "unknown"
+        os.makedirs(self._cookie_dir, exist_ok=True)
+        filepath = os.path.join(self._cookie_dir, f"{domain}.json")
+        result = self.cookies_export(filepath)
+        return filepath
+
+    def load_cookies(self, url: str) -> str:
+        """从本地文件导入 Cookie（按域名匹配）。
+
+        从 tmp/cookies/{domain}.json 导入。文件不存在则跳过。
+
+        Args:
+            url: 目标 URL，用于提取域名匹配 Cookie 文件。
+
+        Returns:
+            导入结果，或 "no_saved_cookies" 表示无已保存 Cookie。
+        """
+        domain = urlparse(url).hostname
+        filepath = os.path.join(self._cookie_dir, f"{domain}.json")
+        if not os.path.isfile(filepath):
+            return "no_saved_cookies"
+        return self.cookies_import(filepath)
 
     def evaluate_js(self, js_code: str) -> str:
         """执行 JavaScript。超长 JS 写入临时文件后通过 stdin 传入。"""
