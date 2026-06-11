@@ -247,6 +247,22 @@ class BrowserActClient:
         """发送键盘按键（如 Enter, Tab, Escape 等）。"""
         return self._run("keys", key_combo, timeout=10)
 
+    def wait_selector(self, selector: str, state: str = "visible", timeout: int = 30000) -> str:
+        """等待指定元素达到目标状态，比 time.sleep 更可靠。
+
+        Args:
+            selector: CSS 选择器
+            state: 等待状态 - visible/hidden/attached/detached
+            timeout: 超时时间（毫秒）
+        """
+        return self._run(
+            "wait", "selector",
+            "--selector", selector,
+            "--state", state,
+            "--timeout", str(timeout),
+            timeout=timeout // 1000 + 10,
+        )
+
     def evaluate_js(self, js_code: str) -> str:
         """执行 JavaScript。超长 JS 写入临时文件后通过 stdin 传入。"""
         if len(js_code) > 500:
