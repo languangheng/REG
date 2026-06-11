@@ -13,7 +13,7 @@
 | F4 | wait_selector — 精确等待元素 | 🔧 底层 | `91173ac` |
 | F5 | Cookie 持久化 — cookies get/set/export/import | 🔧 底层 | `2de67f8` |
 | I5 | Cookie 自动复用集成到 ensure_session | 🔗 接入 | `63d345d` |
-| I4 | wait_selector 替换 time.sleep | 🔗 接入 | 待提交 |
+| I4 | wait_selector 替换 time.sleep | 🔗 接入 | `5404689` |
 | 整理 | 项目临时文件整理到 tmp/_archive | 🧹 运维 | `ee070b7` |
 | 文档 | TASKS.md + WORKFLOW.md 更新 | 📝 文档 | `ab6a346` |
 
