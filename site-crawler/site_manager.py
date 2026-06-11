@@ -21,7 +21,7 @@ SITES_JSON = os.path.join(BASE_DIR, "sites.json")
 # ── 工具 ──────────────────────────────────────────────
 
 def load_sites() -> list:
-    """读取站点列表（供 UI 展示）。"""
+    """读取站点列表（供 UI 展示，支持分组格式）。"""
     if not os.path.isfile(SITES_JSON):
         return []
     with open(SITES_JSON, "r", encoding="utf-8") as f:
@@ -29,14 +29,34 @@ def load_sites() -> list:
     sites = raw.get("sites", {})
     result = []
     for key, val in sites.items():
-        chains_raw = val.get("extract_chains", {})
-        chain_names = list(chains_raw.keys()) if isinstance(chains_raw, dict) else []
+        # 分组信息
+        groups = []
+        for g in val.get("groups", []):
+            chains_raw = g.get("extract_chains", {})
+            chain_names = list(chains_raw.keys()) if isinstance(chains_raw, dict) else []
+            groups.append({
+                "name": g.get("name", ""),
+                "resource_type": g.get("resource_type", ""),
+                "entry_points": g.get("entry_points", []),
+                "extract_chains": chain_names,
+            })
+
+        # 兼容旧格式（无 groups 字段）
+        if not groups:
+            chains_raw = val.get("extract_chains", {})
+            chain_names = list(chains_raw.keys()) if isinstance(chains_raw, dict) else []
+            groups.append({
+                "name": "默认分组",
+                "resource_type": "video",
+                "entry_points": val.get("entry_points", []),
+                "extract_chains": chain_names,
+            })
+
         result.append({
             "key": key,
             "name": val.get("name", key),
             "base_url": val.get("base_url", ""),
-            "entry_points": val.get("entry_points", []),
-            "extract_chains": chain_names,
+            "groups": groups,
         })
     return result
 
@@ -283,9 +303,32 @@ def api_har_generate():
     try:
         from crawler.config_wizard_har import ConfigGenerator
 
+        data = request.get_json(force=True) if request.is_json else {}
+        group_name = data.get("group_name", "").strip()
+        resource_type = data.get("resource_type", "video").strip()
+
         gen = ConfigGenerator(_har_wizard.recording)
         config = gen.generate()
-        config["network_first"] = True
+
+        # 包装为分组格式
+        group = {
+            "name": group_name or "默认分组",
+            "resource_type": resource_type,
+        }
+        # 从生成的配置中提取分组级字段
+        if "entry_points" in config:
+            group["entry_points"] = config.pop("entry_points")
+        if "link_patterns" in config:
+            group["link_patterns"] = config.pop("link_patterns")
+        if "extract_chains" in config:
+            group["extract_chains"] = config.pop("extract_chains")
+        if "pagination" in config:
+            group["pagination"] = config.pop("pagination")
+
+        config["groups"] = [group]
+
+        # 移除旧的顶层字段（已移至分组内）
+        config.pop("network_first", None)
 
         site_key = _har_wizard.recording.site_name.replace(".", "_")
 
@@ -393,6 +436,21 @@ def api_analyze_save():
 
     config = cached["config"]
     site_key = config.get("name", url.replace("https://", "").replace("http://", "").split("/")[0].replace(".", "_"))
+
+    # 将旧格式配置转换为分组格式
+    if "groups" not in config:
+        group = {
+            "name": "默认分组",
+            "resource_type": "video",  # auto_config 默认视频
+        }
+        # 提取分组级字段
+        for field_name in ("entry_points", "link_patterns", "extract_chains", "pagination"):
+            if field_name in config:
+                group[field_name] = config.pop(field_name)
+        config["groups"] = [group]
+        # 移除旧的顶层字段
+        config.pop("network_first", None)
+        config.pop("_extra_categories", None)
 
     raw = read_sites_raw()
     if "sites" not in raw:
