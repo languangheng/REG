@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>测试站点 - 视频列表</title>
+<style>
+  body { font-family: sans-serif; padding: 40px; background: #1a1a2e; color: #eee; }
+  h1 { color: #e94560; }
+  .video-list { list-style: none; padding: 0; }
+  .video-list li { margin: 12px 0; }
+  .video-list a {
+    color: #0f3460; background: #e94560; padding: 10px 20px;
+    text-decoration: none; border-radius: 6px; display: inline-block;
+  }
+  .video-list a:hover { background: #ff6b6b; }
+  .hint { color: #888; margin-top: 30px; font-size: 14px; }
+</style>
+</head>
+<body>
+  <h1>测试站点 - 视频列表</h1>
+  <p>点击下方任意视频进入详情页</p>
+  <ul class="video-list">
+    <li><a href="detail.html?id=1&title=测试视频1">测试视频 1</a></li>
+    <li><a href="detail.html?id=2&title=测试视频2">测试视频 2</a></li>
+    <li><a href="detail.html?id=3&title=测试视频3">测试视频 3</a></li>
+  </ul>
+  <p class="hint">提示：这是本地测试页面，模拟视频网站结构</p>
+</body>
+</html>

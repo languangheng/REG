@@ -1,0 +1,31 @@
+=== 结果 ===
+errors: []
+success: True
+
+=== 日志 ===
+[1] 打开列表页: https://www.mimimi.top/vodshow/12-----------.html
+  ✅ 页面加载: mimimi.top/vodshow/12-----------.html
+[1.5] 分析翻页...
+  [策略2] 点击数字页码按钮，比对 URL...
+  当前URL: https://www.mimimi.top/vodshow/12-----------.html
+  点击第2页 (index=91)
+  点击后URL: https://www.mimimi.top/vodshow/12-----2------.html
+  ✅ 页码点击比对成功: template=/vodshow/12-----{page}------.html
+[2] 提取链接 & 聚类...
+  原始链接: 215
+  模式 1: /vodtype/{id}.html (40 个)
+    示例: 精品色情 → https://www.mimimi.top/vodtype/1.html
+  模式 2: /arttype/{id}.html (24 个)
+    示例: 色情小说 → https://www.mimimi.top/arttype/7.html
+  模式 3: /voddetail/{id}.html (10 个)
+    示例: 1WebyoungAngel独奏自慰，疯狂扣弄骚穴高潮喷水 → https://www.mimimi.top/voddetail/682435.html
+  选择: /voddetail/{id}.html (10 个链接), 类型: video
+[3] 进入详情页: https://www.mimimi.top/voddetail/682435.html
+  策略2: 点击播放按钮 [47] '立即播放'
+  ✅ 流地址: https://2605.lbsl2026.com/20260609/FmhcVNhN/2000kb/hls/index.m3u8
+  格式: m3u8
+[4] 生成配置...
+  ✅ 配置生成完成
+
+=== 配置 ===
+{'name': 'www_mimimi_top', 'base_url': 'https://www.mimimi.top', 'entry_points': ['https://www.mimimi.top/vodshow/12-----------.html'], 'link_patterns': {'video_detail': ['/voddetail/\\d+.html'], 'art_detail': []}, 'pagination': {'type': 'url_increment', 'total_pages': 1, 'url_template': '/vodshow/12-----{page}------.html', 'start_page': 2}, 'extract_chains': {'video': {'steps': [{'name': 'network_capture', 'filter': '.m3u8', 'method': 'network_capture', 'extract_js': ''}]}}}

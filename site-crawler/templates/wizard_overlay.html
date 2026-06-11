@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>配置向导</title>
+<style>
+  body { margin:0; padding:16px; font-family:system-ui,sans-serif; background:#1a1d27; color:#e5e7eb; font-size:13px; }
+  h3 { margin:0 0 8px 0; font-size:14px; color:#a5b4fc; }
+  .step { color:#9ca3af; margin-bottom:10px; }
+  .btn { display:inline-block; padding:6px 14px; border-radius:5px; border:none; cursor:pointer; font-size:12px; margin-right:6px; }
+  .btn-primary { background:#6366f1; color:#fff; }
+  .btn-primary:hover { background:#818cf8; }
+  .btn-ghost { background:transparent; border:1px solid #374151; color:#d1d5db; }
+  .btn-ghost:hover { background:#1f2937; }
+  .log { background:#0f1117; border:1px solid #1f2937; border-radius:4px; padding:6px 8px; max-height:120px; overflow-y:auto; font-size:11px; color:#6b7280; margin-top:8px; }
+  .log .ok { color:#4ade80; }
+  .log .err { color:#f87171; }
+</style>
+</head>
+<body>
+  <h3>🔧 配置向导</h3>
+  <div class="step" id="cw-step">正在初始化...</div>
+  <div id="cw-actions"></div>
+  <div class="log" id="cw-log"></div>
+
+<script>
+// ── 工具函数 ──
+function log(msg, cls='') {
+  const d = document.createElement('div');
+  d.className = cls;
+  d.textContent = msg;
+  const logEl = document.getElementById('cw-log');
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+  console.log('[wizard]', msg);
+}
+function setStep(text) { document.getElementById('cw-step').textContent = text; }
+function setActions(buttons) {
+  const el = document.getElementById('cw-actions');
+  el.innerHTML = '';
+  buttons.forEach(b => {
+    const btn = document.createElement('button');
+    btn.className = 'btn ' + (b.cls || 'btn-primary');
+    btn.textContent = b.label;
+    btn.onclick = b.fn;
+    el.appendChild(btn);
+  });
+}
+
+// ── 状态 ──
+let state = {
+  stage: 'init',
+  link_type: null,
+  selected_link: null,
+  stream_url: null,
+  link_selector: null,
+};
+
+// ── 与父页面通信 ──
+function sendToParent(action, data) {
+  window.parent.postMessage({ source: 'cw-wizard', action, data }, '*');
+}
+
+function startSelectLink() {
+  state.stage = 'select_link';
+  setStep('请点击页面上的一个内容链接（视频或图片）');
+  setActions([
+    { label: '取消', cls: 'btn-ghost', fn: () => { log('已取消'); startSelectLink(); } }
+  ]);
+  log('选择模式已激活，请点击页面链接...');
+  sendToParent('start_select', {});
+}
+
+// ── 接收父页面消息 ──
+window.addEventListener('message', (e) => {
+  if (!e.data || e.data.source !== 'cw-parent') return;
+  const { action, data } = e.data;
+
+  if (action === 'link_selected') {
+    onLinkSelected(data);
+  } else if (action === 'page_loaded') {
+    onPageLoaded(data);
+  }
+});
+
+function onLinkSelected(data) {
+  state.selected_link = data;
+  log(`已选择: ${data.text.substring(0,40)}`);
+  log(`URL: ${data.href}`);
+  // 询问类型
+  state.stage = 'choose_type';
+  setStep('这个链接指向什么内容？');
+  setActions([
+    { label: '视频内容', cls: 'btn-primary', fn: () => chooseType('video') },
+    { label: '图片内容', cls: 'btn-primary', fn: () => chooseType('image') },
+    { label: '重新选择', cls: 'btn-ghost', fn: startSelectLink },
+  ]);
+}
+
+function chooseType(type) {
+  state.link_type = type;
+  log(`类型: ${type}`);
+  state.link_selector = state.selected_link.selector;
+  log(`CSS 选择器: ${state.link_selector}`);
+  // 让父页面导航
+  sendToParent('navigate', { url: state.selected_link.href });
+  state.stage = 'navigating';
+  setStep('正在进入详情页...');
+  setActions([]);
+}
+
+function onPageLoaded(data) {
+  if (state.stage === 'navigating') {
+    if (state.link_type === 'video') {
+      setStep('在详情页中，请点击「播放」或「立即播放」按钮');
+      setActions([
+        { label: '已点击播放', cls: 'btn-primary', fn: onPlaySelected },
+        { label: '跳过此步', cls: 'btn-ghost', fn: skipPlayStep },
+      ]);
+      sendToParent('highlight_play', {});
+      state.stage = 'select_play';
+    } else {
+      sendToParent('extract_images', {});
+    }
+  }
+}
+
+function onPlaySelected() {
+  sendToParent('extract_stream', {});
+}
+
+function skipPlayStep() {
+  sendToParent('extract_stream', {});
+}
+
+// ── 接收提取结果 ──
+window.addEventListener('message', (e) => {
+  if (!e.data || e.data.source !== 'cw-parent') return;
+  if (e.data.action === 'stream_found') {
+    state.stream_url = e.data.data.stream_url;
+    log(`✅ 找到流地址: ${state.stream_url}`, 'ok');
+    setStep('✅ 已找到视频流地址！');
+    setActions([
+      { label: '确认并生成配置', cls: 'btn-primary', fn: finishWizard },
+      { label: '重新选择', cls: 'btn-ghost', fn: startSelectLink },
+    ]);
+  } else if (e.data.action === 'images_found') {
+    const count = e.data.data.count;
+    log(`✅ 找到 ${count} 张图片`, 'ok');
+    setStep(`✅ 找到 ${count} 张图片`);
+    setActions([
+      { label: '确认并生成配置', cls: 'btn-primary', fn: finishWizard },
+      { label: '重新选择', cls: 'btn-ghost', fn: startSelectLink },
+    ]);
+  }
+});
+
+function finishWizard() {
+  setStep('配置已生成，正在保存...');
+  setActions([]);
+  const result = {
+    link_type: state.link_type,
+    link_selector: state.link_selector,
+    selected_url: state.selected_link?.href,
+    stream_url: state.stream_url,
+  };
+  sendToParent('finish', result);
+  log('✅ 配置已生成', 'ok');
+  setStep('✅ 配置生成完成！');
+  setActions([
+    { label: '关闭窗口', cls: 'btn-primary', fn: () => window.close() },
+  ]);
+}
+
+// ── 启动 ──
+setStep('就绪，请点击「开始选择」');
+setActions([
+  { label: '开始选择', cls: 'btn-primary', fn: startSelectLink },
+  { label: '取消', cls: 'btn-ghost', fn: () => log('已取消') },
+]);
+log('配置向导已就绪');
+</script>
+</body>
+</html>
