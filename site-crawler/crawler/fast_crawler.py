@@ -51,6 +51,14 @@ class ListPageResult:
 # ── Markdown 链接提取 ──────────────────────────────────────
 
 
+def _smart_sleep(client: BrowserActClient, selector: str, seconds: float):
+    """智能等待：wait_selector 成功后立即继续，超时则已等待 seconds。"""
+    try:
+        client.wait_selector(selector, timeout=int(seconds * 1000))
+    except Exception:
+        pass  # wait_selector 已等待了 seconds
+
+
 def extract_links_from_markdown(md: str, base_url: str = "") -> list[dict]:
     """从 markdown 文本中提取 [text](url) 链接。"""
     links = []
@@ -143,7 +151,7 @@ def crawl_list_pages(
     seen_urls = set()
 
     client.navigate(start_url)
-    time.sleep(wait_seconds)
+    _smart_sleep(client, "a[href*='/vodplay/'], a[href*='/arttype/'], .vodlist-item, .item, article, main", wait_seconds)
 
     for page_num in range(1, max_pages + 1):
         # 1. markdown 提取链接
@@ -185,7 +193,7 @@ def crawl_list_pages(
             print(f"  → click [{next_el.index}] {next_el.text!r}")
             try:
                 client.click(next_el.index)
-                time.sleep(wait_seconds)
+                _smart_sleep(client, "a[href*='/vodplay/'], a[href*='/arttype/'], .vodlist-item, .item, article, main", wait_seconds)
             except Exception as e:
                 print(f"  Click next failed: {e}")
                 break
@@ -194,7 +202,7 @@ def crawl_list_pages(
             print(f"  → click page# [{next_el.index}] {next_el.text!r}")
             try:
                 client.click(next_el.index)
-                time.sleep(wait_seconds)
+                _smart_sleep(client, "a[href*='/vodplay/'], a[href*='/arttype/'], .vodlist-item, .item, article, main", wait_seconds)
             except Exception as e:
                 print(f"  Click page# failed: {e}")
                 break
@@ -203,7 +211,7 @@ def crawl_list_pages(
             print(f"  → click load-more [{next_el.index}] {next_el.text!r}")
             try:
                 client.click(next_el.index)
-                time.sleep(wait_seconds)
+                _smart_sleep(client, "a[href*='/vodplay/'], a[href*='/arttype/'], .vodlist-item, .item, article, main", wait_seconds)
                 # load_more 不换页，同页追加内容，继续循环
                 # 检查是否有新链接
                 md2 = client.get_markdown()
@@ -239,7 +247,7 @@ def crawl_list_pages(
                 print(f"  → construct URL: {next_url[:60]}")
                 try:
                     client.navigate(next_url)
-                    time.sleep(wait_seconds)
+                    _smart_sleep(client, "a[href*='/vodplay/'], a[href*='/arttype/'], .vodlist-item, .item, article, main", wait_seconds)
                     snap4 = client.parsed_state()
                     if snap4.url == cur_url:
                         print("  URL didn't change, stopping.")
@@ -330,7 +338,7 @@ def crawl_video_streams(
         try:
             # 导航到详情页
             client.navigate(url)
-            time.sleep(wait_seconds)
+            _smart_sleep(client, ".content, .detail, main, article", wait_seconds)
             snap = client.parsed_state()
             item.detail_url = snap.url
 
@@ -340,7 +348,7 @@ def crawl_video_streams(
             if play_el:
                 snap2 = client.parsed_state()
                 client.click(play_el.index)
-                time.sleep(wait_seconds)
+                _smart_sleep(client, "iframe, video, .dplayer, .player", wait_seconds)
                 item.steps_log.append(f"click play [{play_el.index}]")
 
             # 检查当前页面
@@ -494,7 +502,7 @@ def crawl_art_images(
 
         try:
             client.navigate(url)
-            time.sleep(wait_seconds)
+            _smart_sleep(client, "img[src], .content, article, .detail", wait_seconds)
             # 清除旧请求，只记录本页的
             client.network_clear()
             for _ in range(scroll_times):

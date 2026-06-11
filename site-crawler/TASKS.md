@@ -12,6 +12,8 @@
 | F3 | input_text + press_key — 表单输入 | 🔧 底层 | `040fc9e` |
 | F4 | wait_selector — 精确等待元素 | 🔧 底层 | `91173ac` |
 | F5 | Cookie 持久化 — cookies get/set/export/import | 🔧 底层 | `2de67f8` |
+| I5 | Cookie 自动复用集成到 ensure_session | 🔗 接入 | `63d345d` |
+| I4 | wait_selector 替换 time.sleep | 🔗 接入 | 待提交 |
 | 整理 | 项目临时文件整理到 tmp/_archive | 🧹 运维 | `ee070b7` |
 | 文档 | TASKS.md + WORKFLOW.md 更新 | 📝 文档 | `ab6a346` |
 
@@ -23,15 +25,12 @@
 
 ## 当前任务
 
-| # | 任务 | 类型 | 状态 | 阶段 |
-|---|------|------|------|------|
-| I5 | Cookie 自动复用集成到 ensure_session | 🔗 接入 | ⏳ 待启动 | 等待 Plan |
+无（I4 待用户验收后提交）
 
 ## 待办任务（按执行顺序）
 
 | # | 任务 | 类型 | 依赖 | 预期收益 |
 |---|------|------|------|---------|
-| I4 | wait_selector 替换 time.sleep | 🔗 接入 | F4✅ | 精确等待替代固定延时，更可靠更快 |
 | I1 | screenshot 调试截图集成 | 🔗 接入 | F1✅ | 翻页/出错时截图，调试更直观 |
 | I2 | back 返回列表页集成 | 🔗 接入 | F2✅ | 详情页爬完 back() 返回，避免重加载过 CF |
 | F7 | dialog 弹窗处理（底层封装） | 🔧 底层 | — | 3 个方法：accept/dismiss/status |
