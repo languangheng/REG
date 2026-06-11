@@ -1,3 +1,25 @@
 {
-  "sites": {}
+  "sites": {
+    "www_mimimi_top": {
+      "name": "www.mimimi.top",
+      "base_url": "https://www.mimimi.top",
+      "groups": [
+        {
+          "name": "视频",
+          "resource_type": "video",
+          "entry_points": [
+            {"name": "最新", "url": "https://www.mimimi.top/vodshow/12-----------.html", "type": "video"},
+            {"name": "高清无码", "url": "https://www.mimimi.top/vodtype/3.html", "type": "video"}
+          ],
+          "link_patterns": {
+            "video_detail": ["/vodplay/", "/voddetail/"],
+            "art_detail": [],
+            "exclude": ["/search", "/login", "/register"]
+          },
+          "extract_chains": {},
+          "pagination": {"method": "auto"}
+        }
+      ]
+    }
+  }
 }

@@ -57,6 +57,11 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #0f1117; c
 .resource-item .res-type { color: #4ade80; margin-right: 6px; }
 .resource-item .res-title { color: #60a5fa; margin-right: 8px; }
 .resource-item .res-url { color: #6b7280; }
+/* Group header + add-entry button */
+.group-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.group-label { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.add-entry-btn { background: #4f46e5; color: #e0e7ff; border: none; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; white-space: nowrap; transition: background .15s; }
+.add-entry-btn:hover { background: #6366f1; color: #fff; }
 </style>
 </head>
 <body>
@@ -118,6 +123,22 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #0f1117; c
   </div>
 </div>
 
+<!-- Add Entry URL Modal -->
+<div class="modal-overlay" id="addEntryModal">
+  <div class="modal" style="width:460px">
+    <h2>➕ 添加入口 URL</h2>
+    <label>分组：<span id="addEntryGroupLabel" style="color:#f9fafb;font-weight:600"></span></label>
+    <label style="margin-top:8px">入口 URL <span style="color:#f87171">*</span></label>
+    <input id="addEntryUrl" placeholder="https://www.example.com/category/2.html" />
+    <label>入口名称（可选）</label>
+    <input id="addEntryName" placeholder="分类2" />
+    <div class="btn-row">
+      <button class="btn-cancel" onclick="hideAddEntryModal()">取消</button>
+      <button class="btn-confirm" onclick="submitAddEntry()">添加</button>
+    </div>
+  </div>
+</div>
+
 <!-- Crawl Progress Modal -->
 <div class="progress-overlay" id="progressOverlay">
   <div class="progress-box">
@@ -150,20 +171,30 @@ function renderSites() {
   const empty = document.getElementById('emptyState');
   if (!sites.length) { grid.innerHTML = ''; empty.style.display = 'block'; return; }
   empty.style.display = 'none';
-  grid.innerHTML = sites.map(s => `
-    <div class="card">
+  grid.innerHTML = sites.map(s => {
+    const groupsHtml = (s.groups || []).map(g => {
+      const typeIcon = g.resource_type === 'video' ? '🎬' : g.resource_type === 'art' ? '🖼️' : '📄';
+      const epCount = (g.entry_points || []).length;
+      const chains = (g.extract_chains || []).map(c => `<span class="chain-tag">${esc(c)}</span>`).join('');
+      return `<div style="margin-bottom:8px;padding:6px 8px;background:#0f1117;border-radius:4px">
+        <div class="group-row">
+          <div class="group-label">${typeIcon} ${esc(g.name)} <span style="color:#6b7280;font-size:11px">· ${epCount} 入口</span></div>
+          <button class="add-entry-btn" onclick="showAddEntryModal('${esc(s.key)}','${esc(g.name)}')">＋ 添加入口</button>
+        </div>
+        <div class="chains">${chains}</div>
+      </div>`;
+    }).join('');
+
+    return `<div class="card">
       <h3>${esc(s.name)}</h3>
       <div class="base-url">${esc(s.base_url)}</div>
-      <div class="meta">入口: ${s.entry_points?.length || 0} 个</div>
-      <div class="chains">
-        ${(s.extract_chains || []).map(c => `<span class="chain-tag">${esc(c)}</span>`).join('')}
-      </div>
+      ${groupsHtml || '<div style="color:#6b7280;font-size:12px">暂无分组</div>'}
       <div class="actions">
         <button class="btn primary" onclick="testCrawl('${esc(s.key)}')">测试爬取</button>
         <button class="btn" onclick="deleteSite('${esc(s.key)}')">删除</button>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 async function testCrawl(key) {
@@ -314,7 +345,43 @@ async function deleteSite(key) {
   loadSites();
 }
 
-function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;').replace(/"/g,'&quot;'); }
+
+// ── Add Entry URL ────────────────────────────────────
+let _addEntrySiteKey = '';
+let _addEntryGroupName = '';
+
+function showAddEntryModal(siteKey, groupName) {
+  _addEntrySiteKey = siteKey;
+  _addEntryGroupName = groupName;
+  document.getElementById('addEntryGroupLabel').textContent = groupName;
+  document.getElementById('addEntryUrl').value = '';
+  document.getElementById('addEntryName').value = '';
+  document.getElementById('addEntryModal').classList.add('active');
+}
+
+function hideAddEntryModal() {
+  document.getElementById('addEntryModal').classList.remove('active');
+}
+
+async function submitAddEntry() {
+  const url = document.getElementById('addEntryUrl').value.trim();
+  const name = document.getElementById('addEntryName').value.trim();
+  if (!url) { alert('请输入入口 URL'); return; }
+
+  const resp = await fetch(`/api/sites/${encodeURIComponent(_addEntrySiteKey)}/groups/${encodeURIComponent(_addEntryGroupName)}/entries`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({url, name})
+  });
+  const data = await resp.json();
+  if (data.ok) {
+    hideAddEntryModal();
+    loadSites();  // 刷新列表，更新配置信息
+  } else {
+    alert('添加失败: ' + (data.error || '未知错误'));
+  }
+}
 
 function openHarWizard() {
   window.open('/wizard_har', 'har_wizard', 'width=900,height=700');

@@ -80,6 +80,31 @@ body{font-family:-apple-system,system-ui,sans-serif;background:#1a1d27;color:#e5
 /* 加载动画 */
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid #6366f1;border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite;margin-right:8px;vertical-align:middle}
 @keyframes spin{to{transform:rotate(360deg)}}
+
+/* 分组表单 */
+.group-form{display:none;position:absolute;inset:0;background:rgba(15,17,23,.95);z-index:20;flex-direction:column;align-items:center;justify-content:center;gap:16px;border-radius:0}
+.group-form.active{display:flex}
+.group-form h3{font-size:16px;color:#f9fafb;font-weight:600}
+.group-form label{display:block;font-size:12px;color:#9ca3af;margin-bottom:4px;text-align:left;width:320px}
+.group-form input,.group-form select{width:320px;padding:9px 12px;background:#0f1117;border:1px solid #2d3148;border-radius:6px;color:#e5e7eb;font-size:14px;margin-bottom:14px}
+.group-form select{cursor:pointer}
+.group-form .btn-row{display:flex;gap:10px;margin-top:8px}
+.group-form .btn-confirm{background:#6366f1;color:#fff;border:none;padding:8px 24px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:500}
+.group-form .btn-confirm:hover{background:#818cf8}
+.group-form .btn-cancel{background:transparent;border:1px solid #2d3148;color:#d1d5db;padding:8px 24px;border-radius:6px;cursor:pointer;font-size:14px}
+
+/* 添加入口 */
+.add-entry-section{margin-top:10px;padding:10px;background:#0f1117;border:1px solid #2d3148;border-radius:6px}
+.add-entry-section h4{font-size:12px;color:#9ca3af;margin-bottom:8px}
+.add-entry-row{display:flex;gap:8px;align-items:center}
+.add-entry-row input{flex:1;padding:7px 10px;background:#1a1d27;border:1px solid #2d3148;border-radius:4px;color:#e5e7eb;font-size:12px}
+.add-entry-row button{padding:7px 14px;background:#059669;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap}
+.add-entry-row button:hover{background:#10b981}
+.entry-list{margin-top:8px;max-height:100px;overflow-y:auto}
+.entry-item{font-size:11px;color:#d1d5db;padding:3px 0;border-bottom:1px solid #1f2937;display:flex;justify-content:space-between;align-items:center}
+.entry-item .entry-url{color:#60a5fa;word-break:break-all;flex:1}
+.entry-item .entry-name{color:#6b7280;margin-left:8px;white-space:nowrap}
+.entry-item .entry-del{color:#ef4444;cursor:pointer;margin-left:8px;font-size:14px}
 </style>
 </head>
 <body>
@@ -89,7 +114,7 @@ body{font-family:-apple-system,system-ui,sans-serif;background:#1a1d27;color:#e5
   <div class="rec-badge" id="recBadge"><div class="rec-dot"></div>录制中</div>
   <button class="btn btn-primary" id="btnStart" onclick="startRecording()">开始录制</button>
   <button class="btn btn-danger" id="btnStop" onclick="stopRecording()" disabled>停止录制</button>
-  <button class="btn btn-ghost" id="btnGen" onclick="generateConfig()" disabled>生成配置</button>
+  <button class="btn btn-ghost" id="btnGen" onclick="showGroupForm()" disabled>生成配置</button>
 </div>
 
 <div class="main">
@@ -122,6 +147,22 @@ body{font-family:-apple-system,system-ui,sans-serif;background:#1a1d27;color:#e5
       <p>停止录制后将显示浏览路径和检测结果</p>
     </div>
     <div class="result-scroll" id="resultPanel" style="display:none"></div>
+
+    <!-- 分组信息表单 -->
+    <div class="group-form" id="groupForm">
+      <h3>📝 填写分组信息</h3>
+      <label>分组名称（如"电影视频"、"漫画图片"）</label>
+      <input id="groupName" placeholder="电影视频" />
+      <label>资源类型</label>
+      <select id="resourceType">
+        <option value="video">🎬 视频（.m3u8/.mp4/.flv）</option>
+        <option value="art">🖼️ 图片（.jpg/.png/.webp）</option>
+      </select>
+      <div class="btn-row">
+        <button class="btn-cancel" onclick="hideGroupForm()">取消</button>
+        <button class="btn-confirm" onclick="generateConfig()">生成配置</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -281,16 +322,48 @@ function renderResults(summary) {
 }
 
 // ── 生成配置 ──
+let _lastSiteKey = '';
+let _lastGroupName = '';
+
+function showGroupForm() {
+  $('groupForm').classList.add('active');
+  // 默认分组名
+  $('groupName').value = '';
+  $('resourceType').value = 'video';
+  $('groupName').focus();
+}
+
+function hideGroupForm() {
+  $('groupForm').classList.remove('active');
+}
+
 async function generateConfig() {
+  const groupName = $('groupName').value.trim();
+  const resourceType = $('resourceType').value;
+
+  if (!groupName) {
+    alert('请填写分组名称');
+    return;
+  }
+
+  hideGroupForm();
   $('statusText').innerHTML = '<span class="spinner"></span>生成配置中...';
   try {
-    const resp = await fetch('/api/har/generate', {method: 'POST'});
+    const resp = await fetch('/api/har/generate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({group_name: groupName, resource_type: resourceType})
+    });
     const data = await resp.json();
     if (data.ok) {
+      _lastSiteKey = data.site_key;
+      _lastGroupName = groupName;
       $('statusText').textContent = '配置已生成';
-      // 在右侧结果面板追加 JSON
+      // 在右侧结果面板追加 JSON + 添加入口区域
       const panel = $('resultPanel');
-      panel.innerHTML += '<div class="result-section"><div class="result-section-title">生成配置</div><div class="result-yaml">' + esc(data.json || '') + '</div></div>';
+      panel.innerHTML += '<div class="result-section"><div class="result-section-title">生成配置 (' + esc(groupName) + ')</div><div class="result-yaml">' + esc(data.json || '') + '</div></div>';
+      // 添加"添加同模式入口"区域
+      panel.innerHTML += '<div class="add-entry-section"><h4>➕ 添加同模式入口 URL</h4><div class="add-entry-row"><input id="newEntryUrl" placeholder="https://example.com/vodshow/13.html" /><button onclick="addEntryUrl()">添加</button></div><div class="entry-list" id="entryList"></div></div>';
       if (window.opener) {
         window.opener.postMessage({source:'har-wizard', action:'config_saved', site_key: data.site_key}, '*');
       }
@@ -300,6 +373,36 @@ async function generateConfig() {
     }
   } catch(e) {
     $('statusText').textContent = '请求失败';
+    alert('请求失败: ' + e.message);
+  }
+}
+
+// ── 添加同模式入口 ──
+async function addEntryUrl() {
+  const url = document.getElementById('newEntryUrl').value.trim();
+  if (!url) { alert('请输入 URL'); return; }
+  if (!_lastSiteKey || !_lastGroupName) { alert('请先生成配置'); return; }
+
+  try {
+    const resp = await fetch('/api/sites/' + encodeURIComponent(_lastSiteKey) + '/groups/' + encodeURIComponent(_lastGroupName) + '/entries', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url: url, name: ''})
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      document.getElementById('newEntryUrl').value = '';
+      // 刷新入口列表
+      const entryList = document.getElementById('entryList');
+      const item = document.createElement('div');
+      item.className = 'entry-item';
+      item.innerHTML = '<span class="entry-url">' + esc(url) + '</span><span class="entry-name">' + esc(data.entry?.name || '') + '</span>';
+      entryList.appendChild(item);
+      $('statusText').textContent = '入口已添加';
+    } else {
+      alert('添加失败: ' + (data.error || ''));
+    }
+  } catch(e) {
     alert('请求失败: ' + e.message);
   }
 }

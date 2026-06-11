@@ -77,6 +77,11 @@ def save_sites(raw: dict):
 
 # ── 路由 ──────────────────────────────────────────────
 
+@app.route("/api/health", methods=["GET"])
+def api_health():
+    return jsonify({"status": "ok"})
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -118,7 +123,7 @@ def api_wizard_start():
 
 @app.route("/api/crawl/<key>", methods=["GET"])
 def api_crawl(key: str):
-    """SSE 实时返回爬取进度。"""
+    """SSE 实时返回爬取进度（调用分组爬虫）。"""
     raw = read_sites_raw()
     sites = raw.get("sites", {})
     if key not in sites:
@@ -126,18 +131,27 @@ def api_crawl(key: str):
 
     def generate():
         # SSE 每行格式: data: <json>\n\n
-        msg = json.dumps({"msg": f"开始爬取 {key}...", "type": "info"}, ensure_ascii=False)
+        msg = json.dumps({"msg": f"开始爬取 {key}（分组模式）...", "type": "info"}, ensure_ascii=False)
         yield f"data: {msg}\n\n"
 
+        # 调用分组爬虫（使用 -m 方式，确保 crawler 包可被导入）
+        # 复用已有浏览器（与其他端点共享同一个 browser_id）
+        browser_id = "direct_local_100797252049567848"
         cmd = [
             sys.executable,
-            os.path.join(BASE_DIR, "crawler.py"),
+            "-m", "crawler.group_crawler",
             "--site", key,
             "--deep",
-            "--deep-limit", "3",
-            "--wait", "6",
-            "--detail-wait", "5",
+            "--deep-limit", "0",
+            "--wait", "4",
+            "--max-pages", "50",
+            "--browser-id", browser_id,
+            "--output-dir", os.path.join(BASE_DIR, "output"),
         ]
+        # 显式设置 PYTHONPATH，确保 crawler 包可被导入
+        import os as _os
+        env = _os.environ.copy()
+        env["PYTHONPATH"] = BASE_DIR + _os.pathsep + env.get("PYTHONPATH", "")
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -145,6 +159,7 @@ def api_crawl(key: str):
             encoding="utf-8",
             errors="replace",
             cwd=BASE_DIR,
+            env=env,
         )
         for line in proc.stdout:
             line = line.strip()
@@ -158,14 +173,13 @@ def api_crawl(key: str):
                     event_json = json.dumps(event_data, ensure_ascii=False)
                     yield f"data: {event_json}\n\n"
                 except json.JSONDecodeError:
-                    # json 解析失败，按普通日志处理
                     msg = json.dumps({"msg": line, "type": "event_err"}, ensure_ascii=False)
                     yield f"data: {msg}\n\n"
                 continue
 
             # 普通日志行
             ltype = ""
-            if "✅" in line or "OK" in line or "saved" in line.lower():
+            if "✅" in line or "OK" in line or "saved" in line.lower() or "导出" in line:
                 ltype = "ok"
             elif "❌" in line or "error" in line.lower() or "失败" in line:
                 ltype = "err"
@@ -307,28 +321,10 @@ def api_har_generate():
         group_name = data.get("group_name", "").strip()
         resource_type = data.get("resource_type", "video").strip()
 
-        gen = ConfigGenerator(_har_wizard.recording)
+        gen = ConfigGenerator(_har_wizard.recording,
+                              group_name=group_name,
+                              resource_type=resource_type)
         config = gen.generate()
-
-        # 包装为分组格式
-        group = {
-            "name": group_name or "默认分组",
-            "resource_type": resource_type,
-        }
-        # 从生成的配置中提取分组级字段
-        if "entry_points" in config:
-            group["entry_points"] = config.pop("entry_points")
-        if "link_patterns" in config:
-            group["link_patterns"] = config.pop("link_patterns")
-        if "extract_chains" in config:
-            group["extract_chains"] = config.pop("extract_chains")
-        if "pagination" in config:
-            group["pagination"] = config.pop("pagination")
-
-        config["groups"] = [group]
-
-        # 移除旧的顶层字段（已移至分组内）
-        config.pop("network_first", None)
 
         site_key = _har_wizard.recording.site_name.replace(".", "_")
 
@@ -345,6 +341,44 @@ def api_har_generate():
         return jsonify({"ok": True, "config_path": SITES_JSON, "json": config_json_str, "site_key": site_key})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/sites/<key>/groups/<group_name>/entries", methods=["POST"])
+def api_add_entry(key: str, group_name: str):
+    """向指定分组添加同模式入口 URL。"""
+    data = request.get_json(force=True)
+    url = data.get("url", "").strip()
+    entry_name = data.get("name", "").strip()
+
+    if not url:
+        return jsonify({"ok": False, "error": "URL 不能为空"}), 400
+
+    raw = read_sites_raw()
+    sites = raw.get("sites", {})
+    if key not in sites:
+        return jsonify({"ok": False, "error": f"站点 {key} 不存在"}), 404
+
+    site = sites[key]
+    groups = site.get("groups", [])
+
+    # 查找目标分组
+    target = None
+    for g in groups:
+        if g.get("name") == group_name:
+            target = g
+            break
+
+    if not target:
+        return jsonify({"ok": False, "error": f"分组 '{group_name}' 不存在"}), 404
+
+    # 添加入口
+    entry_points = target.get("entry_points", [])
+    new_entry = {"name": entry_name or f"入口{len(entry_points) + 1}", "url": url, "type": target.get("resource_type", "video")}
+    entry_points.append(new_entry)
+    target["entry_points"] = entry_points
+
+    save_sites(raw)
+    return jsonify({"ok": True, "entry": new_entry})
 
 
 # ── Auto Analyze API ────────────────────────────────
