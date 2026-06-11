@@ -263,6 +263,28 @@ class BrowserActClient:
             timeout=timeout // 1000 + 10,
         )
 
+    def cookies_get(self, url: str = "") -> str:
+        """获取当前页面的 Cookie 列表。可选指定 URL 过滤。"""
+        args = ["cookies", "get"]
+        if url:
+            args.extend(["--url", url])
+        return self._run(*args, timeout=10)
+
+    def cookies_set(self, name: str, value: str, url: str = "") -> str:
+        """设置 Cookie。"""
+        args = ["cookies", "set", name, value]
+        if url:
+            args.extend(["--url", url])
+        return self._run(*args, timeout=10)
+
+    def cookies_export(self, filepath: str) -> str:
+        """导出 Cookie 到文件。"""
+        return self._run("cookies", "export", filepath, timeout=10)
+
+    def cookies_import(self, filepath: str) -> str:
+        """从文件导入 Cookie。"""
+        return self._run("cookies", "import", filepath, timeout=10)
+
     def evaluate_js(self, js_code: str) -> str:
         """执行 JavaScript。超长 JS 写入临时文件后通过 stdin 传入。"""
         if len(js_code) > 500:
