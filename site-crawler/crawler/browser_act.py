@@ -239,6 +239,14 @@ class BrowserActClient:
         """刷新当前页面。"""
         return self._run("reload", timeout=30)
 
+    def input_text(self, index: int, text: str) -> str:
+        """点击元素后输入文字（用于搜索框、输入框等）。"""
+        return self._run("input", str(index), text, timeout=15)
+
+    def press_key(self, key_combo: str) -> str:
+        """发送键盘按键（如 Enter, Tab, Escape 等）。"""
+        return self._run("keys", key_combo, timeout=10)
+
     def evaluate_js(self, js_code: str) -> str:
         """执行 JavaScript。超长 JS 写入临时文件后通过 stdin 传入。"""
         if len(js_code) > 500:
