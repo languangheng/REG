@@ -381,7 +381,7 @@ function showAnalyzeResult(d) {
     <div>基础 URL: ${esc(c.base_url||'')}</div>
     <div>入口: ${esc((c.entry_points||[]).join(', '))}</div>
     <div>翻页: ${esc(c.pagination?.type||'unknown')} (共 ${c.pagination?.total_pages||'?'} 页)</div>
-    <div>提取链: ${esc(typeof (c.extract_chains)==='object' && !Array.isArray(c.extract_chains) ? Object.keys(c.extract_chains).join(', ') : (c.extract_chains||[]).map(ch=>ch.name||ch).join(', '))}</div>
+    <div>提取链: ${esc(Object.keys(c.extract_chains||{}).join(', '))}</div>
     <div style="margin-top:10px">
       <button onclick="saveAnalyzeResult()" style="background:#6366f1;color:#fff;border:none;padding:7px 18px;border-radius:6px;cursor:pointer;margin-right:8px">💾 保存配置</button>
       <button onclick="document.getElementById('resultYaml').style.display=document.getElementById('resultYaml').style.display==='none'?'block':'none'" style="background:transparent;border:1px solid #2d3148;color:#d1d5db;padding:7px 18px;border-radius:6px;cursor:pointer">查看 YAML</button>
@@ -407,6 +407,27 @@ async function saveAnalyzeResult() {
     alert('保存失败: ' + (data.error || ''));
   }
 }
+
+// ── HAR 向导 postMessage 监听 ─────────────────────────
+window.addEventListener('message', (e) => {
+  if (e.data?.source === 'har-wizard' && e.data?.action === 'config_saved') {
+    const beforeCount = sites.length;
+    loadSites().then(() => {
+      const afterCount = sites.length;
+      const newCount = afterCount - beforeCount;
+      const siteKey = e.data.site_key || '';
+      console.log(`[HAR] 配置已保存, 列表: ${beforeCount} → ${afterCount} (+${newCount})`);
+      if (newCount > 0) {
+        const newSite = sites.find(s => s.key === siteKey);
+        if (newSite) {
+          console.log(`[HAR] 新站点: ${newSite.key} (${newSite.name})`);
+        }
+      } else {
+        console.warn('[HAR] 列表数量未增加，配置可能已覆盖已有站点');
+      }
+    });
+  }
+});
 
 loadSites();
 </script>

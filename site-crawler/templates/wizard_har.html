@@ -291,7 +291,9 @@ async function generateConfig() {
       // 在右侧结果面板追加 YAML
       const panel = $('resultPanel');
       panel.innerHTML += '<div class="result-section"><div class="result-section-title">生成配置</div><div class="result-yaml">' + esc(data.yaml || '') + '</div></div>';
-      window.parent.postMessage({source:'har-wizard', action:'config_saved'}, '*');
+      if (window.opener) {
+        window.opener.postMessage({source:'har-wizard', action:'config_saved', site_key: data.site_key}, '*');
+      }
     } else {
       $('statusText').textContent = '生成失败';
       alert('生成失败: ' + (data.error || ''));

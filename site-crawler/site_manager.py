@@ -38,14 +38,8 @@ def load_sites() -> list:
     sites = raw.get("sites", {})
     result = []
     for key, val in sites.items():
-        # extract_chains 可能是 list of dict（旧）或 dict of dict（auto_config 生成）
-        chains_raw = val.get("extract_chains", [])
-        if isinstance(chains_raw, dict):
-            chain_names = list(chains_raw.keys())
-        elif isinstance(chains_raw, list):
-            chain_names = [ch.get("name", "") for ch in chains_raw if isinstance(ch, dict)]
-        else:
-            chain_names = []
+        chains_raw = val.get("extract_chains", {})
+        chain_names = list(chains_raw.keys()) if isinstance(chains_raw, dict) else []
         result.append({
             "key": key,
             "name": val.get("name", key),
@@ -314,7 +308,7 @@ def api_har_generate():
         raw["sites"][site_key] = config
         save_sites(raw)
 
-        return jsonify({"ok": True, "config_path": SITES_YAML, "yaml": yaml_str})
+        return jsonify({"ok": True, "config_path": SITES_YAML, "yaml": yaml_str, "site_key": site_key})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
 
