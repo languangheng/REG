@@ -356,7 +356,7 @@ def api_analyze():
 
         def run():
             try:
-                result = auto_config_multi(list_url=url, client=client, on_log=on_log, is_homepage=is_homepage)
+                result = auto_config_multi(url=url, client=client, on_log=on_log, is_homepage=is_homepage)
                 result_holder[0] = result
             except Exception as e:
                 result_holder[0] = e
