@@ -210,6 +210,23 @@ class BrowserActClient:
         """滚动到页面底部（JS 一次跳到底，比多次 scroll_down 快）。"""
         return self._run("eval", "window.scrollTo(0, document.body.scrollHeight)", timeout=10)
 
+    def screenshot(self, path: str = "", full_page: bool = False) -> str:
+        """页面截图。
+
+        Args:
+            path: 保存路径，空则保存到临时文件
+            full_page: 是否截取整个页面（含滚动区域）
+
+        Returns:
+            截图文件路径
+        """
+        args = ["screenshot"]
+        if path:
+            args.append(path)
+        if full_page:
+            args.append("--full")
+        return self._run(*args, timeout=30)
+
     def evaluate_js(self, js_code: str) -> str:
         """执行 JavaScript。超长 JS 写入临时文件后通过 stdin 传入。"""
         if len(js_code) > 500:
