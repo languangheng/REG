@@ -8,9 +8,11 @@
 
 import sys
 import io
+import os
 import time
 import re
 import argparse
+import glob as glob_mod
 from dataclasses import dataclass, field
 from typing import Optional
 from urllib.parse import urlparse, urljoin
@@ -57,6 +59,50 @@ def _smart_sleep(client: BrowserActClient, selector: str, seconds: float):
         client.wait_selector(selector, timeout=int(seconds * 1000))
     except Exception:
         pass  # wait_selector 已等待了 seconds
+
+
+# ── 调试截图 ──────────────────────────────────────────────
+
+# 截图水位线配置
+_SCREENSHOT_MAX = 100   # 截图总数上限
+_SCREENSHOT_KEEP = 50   # 超出后保留最近数量
+
+
+def _debug_screenshot(client: BrowserActClient, name: str, output_dir: str = "tmp/screenshots"):
+    """调试截图：保存到 tmp/screenshots/，文件名含时间戳和场景名。
+
+    水位线策略：
+    - 截图总数超过 _SCREENSHOT_MAX 时，删除最旧的文件，保留最近 _SCREENSHOT_KEEP 张
+    - 截图失败不影响主流程
+    """
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        filepath = os.path.join(output_dir, f"{name}_{ts}.png")
+        client.screenshot(filepath)
+        print(f"  📸 screenshot: {filepath}")
+        _cleanup_screenshots(output_dir)
+    except Exception as e:
+        print(f"  ⚠️ screenshot failed: {e}")
+
+
+def _cleanup_screenshots(output_dir: str):
+    """水位线清理：截图超过上限时删除最旧的，保留最近一半。"""
+    try:
+        files = sorted(
+            glob_mod.glob(os.path.join(output_dir, "*.png")),
+            key=os.path.getmtime,
+        )
+        if len(files) > _SCREENSHOT_MAX:
+            to_delete = files[:len(files) - _SCREENSHOT_KEEP]
+            for f in to_delete:
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
+            print(f"  🗑️ screenshots cleanup: deleted {len(to_delete)} old files, kept {len(files) - len(to_delete)}")
+    except Exception:
+        pass
 
 
 def extract_links_from_markdown(md: str, base_url: str = "") -> list[dict]:
@@ -194,7 +240,9 @@ def crawl_list_pages(
             try:
                 client.click(next_el.index)
                 _smart_sleep(client, "a[href*='/vodplay/'], a[href*='/arttype/'], .vodlist-item, .item, article, main", wait_seconds)
+                _debug_screenshot(client, f"list_p{page_num}_after_click")
             except Exception as e:
+                _debug_screenshot(client, f"list_p{page_num}_click_error")
                 print(f"  Click next failed: {e}")
                 break
 
@@ -203,7 +251,9 @@ def crawl_list_pages(
             try:
                 client.click(next_el.index)
                 _smart_sleep(client, "a[href*='/vodplay/'], a[href*='/arttype/'], .vodlist-item, .item, article, main", wait_seconds)
+                _debug_screenshot(client, f"list_p{page_num}_after_pagenum")
             except Exception as e:
+                _debug_screenshot(client, f"list_p{page_num}_pagenum_error")
                 print(f"  Click page# failed: {e}")
                 break
 
@@ -379,6 +429,7 @@ def crawl_video_streams(
                 print(f"    ⚠️ not play page: {snap.url[:60]}")
 
         except Exception as e:
+            _debug_screenshot(client, f"video_{i}_error")
             item.steps_log.append(f"error: {e}")
             print(f"    ❌ error: {e}")
 
@@ -513,6 +564,7 @@ def crawl_art_images(
             item.steps_log.append(f"found {len(images)} images")
             print(f"    ✅ {len(images)} images")
         except Exception as e:
+            _debug_screenshot(client, f"art_{i}_error")
             item.steps_log.append(f"error: {e}")
             print(f"    ❌ error: {e}")
 
