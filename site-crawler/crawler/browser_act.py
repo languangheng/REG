@@ -227,6 +227,18 @@ class BrowserActClient:
             args.append("--full")
         return self._run(*args, timeout=30)
 
+    def back(self) -> str:
+        """浏览器后退。"""
+        return self._run("back", timeout=15)
+
+    def forward(self) -> str:
+        """浏览器前进。"""
+        return self._run("forward", timeout=15)
+
+    def reload(self) -> str:
+        """刷新当前页面。"""
+        return self._run("reload", timeout=30)
+
     def evaluate_js(self, js_code: str) -> str:
         """执行 JavaScript。超长 JS 写入临时文件后通过 stdin 传入。"""
         if len(js_code) > 500:
