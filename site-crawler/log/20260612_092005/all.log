@@ -1,6 +1,0 @@
-[2026-06-12 09:20:05] [INFO] [logger] 日志会话开始: session=20260612_092005, dir=C:\Users\languangheng\.qclaw\workspace-tfxjjhfnjialcuju\site-crawler\log\20260612_092005
-[2026-06-12 09:20:05] [INFO] [logger]   all.log  → C:\Users\languangheng\.qclaw\workspace-tfxjjhfnjialcuju\site-crawler\log\20260612_092005\all.log
-[2026-06-12 09:20:05] [INFO] [logger]   err.log  → C:\Users\languangheng\.qclaw\workspace-tfxjjhfnjialcuju\site-crawler\log\20260612_092005\err.log
-[2026-06-12 09:20:05] [INFO] [test] 测试信息日志
-[2026-06-12 09:20:05] [WARNING] [test] 测试警告日志
-[2026-06-12 09:20:05] [ERROR] [test] 测试错误日志
