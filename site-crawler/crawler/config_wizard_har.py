@@ -274,8 +274,25 @@ class ConfigGenerator:
         # 已知 site_type → 用内置默认链配置
         if site_type == "maccms":
             from crawler.site_config import MACCMS_CRAWL_PATTERN, MACCMS_LINK_PATTERNS
-            group["crawl_pattern"] = MACCMS_CRAWL_PATTERN
-            # 合并 link_patterns
+
+            if self.resource_type == "art":
+                # 图片分组：复制 MACCMS_CRAWL_PATTERN，修改 level_1 为图片捕获
+                import copy
+                art_cp = copy.deepcopy(MACCMS_CRAWL_PATTERN)
+                if "level_1" in art_cp:
+                    art_cp["level_1"] = {
+                        "steps": [
+                            {"action": "navigate", "url_template": ""},
+                            {"action": "smart_wait", "selector": "img[src], .art-content, .content, .pic"},
+                            {"action": "network_capture", "filter": ".jpg,.jpeg,.png,.webp,.gif",
+                             "wait_seconds": 3},
+                        ]
+                    }
+                group["crawl_pattern"] = art_cp
+            else:
+                group["crawl_pattern"] = MACCMS_CRAWL_PATTERN
+
+            # 合并 link_patterns（视频默认 + 录制推断）
             inferred_lp = group.get("link_patterns", {})
             for key in ("video_detail", "play_page", "exclude"):
                 if key not in inferred_lp and key in MACCMS_LINK_PATTERNS:
@@ -317,30 +334,49 @@ class ConfigGenerator:
         # 有图片的步骤之前的那一步是 art_detail
         video_detail_paths = set()
         art_detail_paths = set()
+
+        # 填充 video_detail_paths（视频分组）
         for i, step in enumerate(self.rec.steps):
             if step.m3u8_urls or step.mp4_urls:
-                # 当前步骤是播放页，上一步可能是详情页
                 if i > 0:
                     prev_path = urlparse(self.rec.steps[i-1].url).path
                     video_detail_paths.add(self._generalize_path(prev_path))
-                # 也可能是自己（详情页内嵌播放）
                 cur_path = urlparse(step.url).path
                 if not any(kw in cur_path for kw in ["/play/", "/vodplay/"]):
                     video_detail_paths.add(self._generalize_path(cur_path))
+
+        # 填充 art_detail_paths（图片分组）
+        if self.resource_type == "art":
+            # 启发式：最后一个步骤大概率是图片详情页
+            for step in reversed(self.rec.steps):
+                p = urlparse(step.url).path
+                # 跳过列表页
+                if not any(kw in p for kw in ["/arttype/", "/list", "/category", "/artsearch/"]):
+                    art_detail_paths.add(self._generalize_path(p))
+                    break
+            # 如果上面没找到，用倒数第二步（列表→详情的跳转）
+            if not art_detail_paths and len(self.rec.steps) >= 2:
+                p = urlparse(self.rec.steps[-1].url).path
+                art_detail_paths.add(self._generalize_path(p))
 
         for pattern in video_detail_paths:
             if pattern and pattern != "/":
                 video_detail.append(pattern)
 
+        for pattern in art_detail_paths:
+            if pattern and pattern != "/":
+                art_detail.append(pattern)
+
         # 排除模式：列表页、搜索页等
-        list_keywords = ["/vodshow/", "/vodtype/", "/vodsearch/", "/topic/", "/tag/", "/static/"]
+        list_keywords = ["/vodshow/", "/vodtype/", "/vodsearch/", "/topic/", "/tag/", "/static/",
+                         "/arttype/", "/artsearch/"]
         for path in paths:
             gen = self._generalize_path(path)
             if any(kw in path for kw in list_keywords) and gen not in exclude:
                 exclude.append(gen)
 
-        # 如果没推断出来，给个默认
-        if not video_detail:
+        # 如果没推断出来，给个默认（仅视频分组）
+        if not video_detail and self.resource_type == "video":
             for path in paths:
                 if re.search(r'/\d+', path) and "/play" not in path and "/vodshow" not in path:
                     video_detail.append(self._generalize_path(path))
@@ -431,32 +467,29 @@ class ConfigGenerator:
     def _generalize_path(path: str) -> str:
         """将 URL 路径泛化为正则模式。
 
-        策略：保留第一个数字段（分类 ID）和文件后缀，中间所有内容（无论多少字符）替换为 \\d+。
-        例: /voddetail/227275.html      → /voddetail/227275\\d+\\.html
-            /vodshow/12--------2---.html → /vodshow/12\\d+\\.html
-            /vodtype/3-6.html            → /vodtype/3\\d+\\.html
+        策略：将所有数字序列替换为 \\d+，转义点号。
+        例: /voddetail/227275.html    → /voddetail/\\d+\\.html
+            /artdetail-38385.html   → /artdetail-\\d+\\.html
+            /vodshow/12----.html   → /vodshow/\\d+\\.html
         """
-        # 1. 找第一个数字段（分类 ID）
-        m_cat = re.match(r'^/([^/]*?)(\d+)', path)
-        if not m_cat:
-            return re.sub(r'\d+', lambda _: r'\d+', path)
+        import re
+        # 1. 替换所有数字序列为 \d+
+        generalized = re.sub(r'\d+', r'\\d+', path)
+        # 2. 转义点号（正则中点号匹配任意字符，需转义）
+        generalized = generalized.replace('.', r'\.')
+        return generalized
 
-        prefix = m_cat.group(1)  # '/' 或 '/vodshow/'
-        cat_id = m_cat.group(2)  # '12'
-        after_cat = path[m_cat.end():]  # '--------2---.html'
+    @staticmethod
+    def _path_to_url_template(path: str) -> str:
+        """将 URL 路径转换为 url_template（用 {id} 占位符）。
 
-        # 2. 找文件后缀（.html, .php 等）
-        suffix_m = re.search(r'(\.[^/]+)$', after_cat)  # '.html'
-        if suffix_m:
-            suffix = suffix_m.group(1)  # '.html'
-            middle_raw = after_cat[:suffix_m.start()]  # '--------2---'
-        else:
-            suffix = ''
-            middle_raw = after_cat
-
-        # 3. middle_raw 整体替换为 \\d+，不论内容是什么
-        #    （包含分类分隔符 + 页码 + 其他字符，统一泛化）
-        return f"{prefix}{cat_id}\\d+{suffix}"
+        替换最后一个数字序列为 {id}（详情页 ID）。
+        例: /voddetail/227275.html  → /voddetail/{id}.html
+            /artdetail-38385.html → /artdetail-{id}.html
+        """
+        import re
+        # 替换最后一个数字序列为 {id}
+        return re.sub(r'\d+(?=[^/]*$)', '{id}', path)
 
     def _detect_site_type(self) -> str:
         """从录制数据的 URL 模式检测站点类型。"""
@@ -495,7 +528,7 @@ class ConfigGenerator:
 
                 chains["stream_capture"] = {
                     "steps": [
-                        {"action": "navigate", "url_template": self._generalize_path(url_path)},
+                        {"action": "navigate", "url_template": self._path_to_url_template(url_path)},
                         {"action": "smart_wait", "selector": wait_sel},
                         {"action": "network_capture", "filter": ".m3u8,.mp4,.flv", "wait_seconds": 5},
                     ]
@@ -504,15 +537,41 @@ class ConfigGenerator:
                 break
             else:
                 # 无流 → 中间链
+                is_last_step = (i == len(self.rec.steps) - 1)
+
+                # 图片分组的最后一步 → 网络图片捕获（不是 extract_links）
+                if is_last_step and self.resource_type == "art" and chain_count > 0:
+                    nav_template = self._path_to_url_template(url_path)
+                    chains["level_1"] = {
+                        "steps": [
+                            {"action": "navigate", "url_template": nav_template},
+                            {"action": "smart_wait", "selector": "img[src], .art-content, .content, .pic"},
+                            {"action": "network_capture", "filter": ".jpg,.jpeg,.png,.webp,.gif",
+                             "wait_seconds": 3},
+                        ]
+                    }
+                    chain_order.append("level_1")
+                    break
+
                 chain_name = "list_crawl" if chain_count == 0 else f"level_{chain_count}"
-                generalized = self._generalize_path(url_path)
+                # list_crawl 不需要 url_template（用入口 URL）
+                # level_N 需要 url_template 构造详情页 URL
+                nav_template = "" if chain_count == 0 else self._path_to_url_template(url_path)
                 wait_sel = self._infer_selector_from_path(url_path)
+
+                # 根据 resource_type 确定 link_type
+                if self.resource_type == "art":
+                    link_type = "art_detail"
+                elif self.resource_type == "video":
+                    link_type = "video_detail"
+                else:
+                    link_type = "next_level"
 
                 chains[chain_name] = {
                     "steps": [
-                        {"action": "navigate", "url_template": generalized},
+                        {"action": "navigate", "url_template": nav_template},
                         {"action": "smart_wait", "selector": wait_sel},
-                        {"action": "extract_links", "source": "markdown", "link_type": "next_level"},
+                        {"action": "extract_links", "source": "markdown", "link_type": link_type},
                     ]
                 }
                 if chain_count == 0:

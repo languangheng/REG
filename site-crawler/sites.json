@@ -9,8 +9,8 @@
           "resource_type": "art",
           "entry_points": [
             {
-              "name": "mimimi.top/arttype/8",
-              "url": "https://www.mimimi.top/arttype/85.html",
+              "name": "Just a moment...",
+              "url": "https://www.mimimi.top/arttype/8.html",
               "type": "art"
             }
           ],
@@ -19,16 +19,31 @@
               "/artdetail-\\d+\\.html"
             ],
             "exclude": [
-              "/arttype/",
-              "/artsearch/",
-              "/static/"
+              "/arttype/\\d+\\.html"
             ]
+          },
+          "extract_chains": {
+            "art": {
+              "steps": [
+                {
+                  "name": "enter_detail",
+                  "method": "navigate"
+                },
+                {
+                  "name": "capture_images",
+                  "method": "network_capture",
+                  "filter": ".jpg,.jpeg,.png,.webp,.gif",
+                  "wait_seconds": 3
+                }
+              ]
+            }
           },
           "crawl_pattern": {
             "list_crawl": {
               "steps": [
                 {
-                  "action": "navigate"
+                  "action": "navigate",
+                  "url_template": ""
                 },
                 {
                   "action": "smart_wait",
@@ -51,7 +66,8 @@
             "level_1": {
               "steps": [
                 {
-                  "action": "navigate"
+                  "action": "navigate",
+                  "url_template": "/artdetail-{id}.html"
                 },
                 {
                   "action": "smart_wait",
@@ -66,8 +82,7 @@
             }
           }
         }
-      ],
-      "site_type": "maccms"
+      ]
     }
   }
 }
