@@ -853,6 +853,52 @@ class CrawlEngine:
         """从 network_requests 中提取流地址（实例方法，委托模块级函数）。"""
         return _extract_streams(self.client, filter_str)
 
+    def _convert_to_crawl_results(
+        self,
+        links: list[dict],
+        chain_result: ChainResult,
+        group: GroupConfig,
+    ) -> list[CrawlResult]:
+        """将链执行结果转换为 CrawlResult 列表。"""
+        results = []
+
+        if chain_result.streams:
+            # 有流地址 → 每个流地址一条结果
+            for i, stream_url in enumerate(chain_result.streams):
+                title = links[i].get("text", "")[:50] if i < len(links) else f"stream_{i}"
+                detail_url = links[i].get("url", "") if i < len(links) else ""
+                results.append(CrawlResult(
+                    title=title,
+                    detail_url=detail_url,
+                    stream_url=stream_url,
+                    stream_format="m3u8" if ".m3u8" in stream_url.lower() else "mp4",
+                ))
+        elif chain_result.images:
+            # 有图片 → 合并为一条结果
+            results.append(CrawlResult(
+                images=chain_result.images,
+            ))
+        else:
+            # 无流/图 → 返回链接列表
+            for link in links:
+                results.append(CrawlResult(
+                    title=link.get("text", "")[:50],
+                    detail_url=link.get("url", ""),
+                ))
+
+        return results
+
+    def _links_to_crawl_results(
+        self,
+        links: list[dict],
+        group: GroupConfig,
+    ) -> list[CrawlResult]:
+        """将链接列表转换为 CrawlResult 列表。"""
+        return [
+            CrawlResult(title=link.get("text", "")[:50], detail_url=link.get("url", ""))
+            for link in links
+        ]
+
     def _execute_chain_steps(
         self,
         chain: CrawlChain,
@@ -1042,49 +1088,3 @@ def _extract_streams(client: BrowserActClient, filter_str: str = "") -> list[str
             streams.append(url)
 
     return streams
-
-    def _convert_to_crawl_results(
-        self,
-        links: list[dict],
-        chain_result: ChainResult,
-        group: GroupConfig,
-    ) -> list[CrawlResult]:
-        """将链执行结果转换为 CrawlResult 列表。"""
-        results = []
-
-        if chain_result.streams:
-            # 有流地址 → 每个流地址一条结果
-            for i, stream_url in enumerate(chain_result.streams):
-                title = links[i].get("text", "")[:50] if i < len(links) else f"stream_{i}"
-                detail_url = links[i].get("url", "") if i < len(links) else ""
-                results.append(CrawlResult(
-                    title=title,
-                    detail_url=detail_url,
-                    stream_url=stream_url,
-                    stream_format="m3u8" if ".m3u8" in stream_url.lower() else "mp4",
-                ))
-        elif chain_result.images:
-            # 有图片 → 合并为一条结果
-            results.append(CrawlResult(
-                images=chain_result.images,
-            ))
-        else:
-            # 无流/图 → 返回链接列表
-            for link in links:
-                results.append(CrawlResult(
-                    title=link.get("text", "")[:50],
-                    detail_url=link.get("url", ""),
-                ))
-
-        return results
-
-    def _links_to_crawl_results(
-        self,
-        links: list[dict],
-        group: GroupConfig,
-    ) -> list[CrawlResult]:
-        """将链接列表转换为 CrawlResult 列表。"""
-        return [
-            CrawlResult(title=link.get("text", "")[:50], detail_url=link.get("url", ""))
-            for link in links
-        ]
