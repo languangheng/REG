@@ -692,149 +692,6 @@ class CrawlEngine:
             images=all_images,
         )
 
-    def _execute_chain_steps(
-        self,
-        chain: CrawlChain,
-        url: str = "",
-        group: GroupConfig = None,
-        pattern: CrawlPattern = None,
-    ) -> ChainResult:
-        """执行一条链的所有步骤（实例方法，委托模块级函数）。"""
-        return _run_chain_steps(self.client, chain, url, self.base_url, group, self._js_vars)
-
-
-def _resolve_target_url(
-    step: CrawlAction,
-    fallback_url: str,
-    base_url: str,
-    js_vars: dict,
-) -> str:
-    """解析步骤的 URL 来源（worker-safe）。
-
-    优先级:
-      1. url_from → 从 JS 变量取
-      2. url_template → 填充 params 变量槽
-      3. fallback_url → 直接使用传入的链接 URL
-    """
-    if step.url_from and step.url_from in js_vars:
-        return str(js_vars[step.url_from])
-
-    if step.url_template:
-        url = step.url_template
-        params = step.params or {}
-        for key, val in params.items():
-            url = url.replace(f"{{{key}}}", str(val))
-
-        remaining_placeholders = re.findall(r'\{(\w+)\}', url)
-        if remaining_placeholders:
-            _log.debug("url_template 仍有未填充占位符 %s，fallback: %s",
-                       remaining_placeholders, fallback_url[:80] if fallback_url else "(空)")
-            if fallback_url:
-                return fallback_url
-            if not url.startswith(('http://', 'https://')):
-                url = urljoin(base_url, url)
-            return url
-
-        if not url.startswith(('http://', 'https://')):
-            url = urljoin(base_url, url)
-        return url
-
-    return fallback_url
-
-
-def _run_chain_steps(
-    client: BrowserActClient,
-    chain: CrawlChain,
-    url: str,
-    base_url: str,
-    group: GroupConfig,
-    js_vars: dict,
-) -> ChainResult:
-    """执行一条链的所有步骤（worker-safe，不依赖 CrawlEngine 实例）。
-
-    任何步骤导致浏览器 session 丢失时，立即终止当前链并返回已有结果。
-    """
-    result = ChainResult(chain_name=chain.name)
-
-    chain_has_network_capture = any(s.action == "network_capture" for s in chain.steps)
-    if chain_has_network_capture:
-        try:
-            client.network_clear()
-            _log_msg("  network_clear (pre-navigate, chain contains network_capture)")
-        except Exception:
-            pass
-
-    for step in chain.steps:
-        action = step.action
-
-        try:
-            if action == "navigate":
-                target_url = _resolve_target_url(step, url, base_url, js_vars)
-                if target_url:
-                    _log_msg(f"  navigate → {target_url[:80]}")
-                    client.navigate(target_url)
-
-            elif action == "smart_wait":
-                _smart_wait(client, step.selector, timeout=step.timeout, state=step.state)
-
-            elif action == "extract_links":
-                md = client.get_markdown()
-                raw_links = extract_links_from_markdown(md, base_url)
-                lp = group.link_patterns if group else LinkPatterns()
-                if not lp._compiled:
-                    lp.compile()
-                classified = classify_links_by_patterns(raw_links, lp)
-
-                if step.link_type:
-                    result.links = classified.get(step.link_type, [])
-                else:
-                    for lt, links in classified.items():
-                        result.links.extend(links)
-
-            elif action == "extract_images":
-                result.images = client.get_all_image_urls()
-
-            elif action == "network_capture":
-                wait = step.wait_seconds or 5
-                _log_msg(f"  network_capture: 等待 {wait}s 后读取网络请求...")
-                time.sleep(wait)
-                result.streams = _extract_streams(client, step.filter)
-                _log_msg(f"  network_capture: 捕获到 {len(result.streams)} 个流地址")
-
-            elif action == "click":
-                client.click(step.index)
-
-            elif action == "evaluate_js":
-                js_result = client.evaluate_json(step.script)
-                if step.save_as:
-                    js_vars[step.save_as] = js_result
-                    result.js_results[step.save_as] = js_result
-
-            elif action == "scroll":
-                for _ in range(step.times):
-                    if step.direction == "down":
-                        client.scroll_down(500)
-                    else:
-                        client.scroll_top()
-                    time.sleep(step.wait_after or 2)
-
-            elif action == "wait":
-                time.sleep(step.seconds or 3)
-
-        except Exception as e:
-            err_msg = str(e)
-            is_session_lost = any(keyword in err_msg.lower() for keyword in [
-                "no active session", "no active browser", "session not found",
-                "session不存在", "browser closed", "target closed",
-            ])
-            if is_session_lost:
-                _log_msg(f"  浏览器 session 丢失，终止链 '{chain.name}': {e}", "err")
-                break
-            else:
-                _log_msg(f"  步骤 {action} 失败（非致命）: {e}", "warn")
-
-    return result
-
     def _resolve_url(self, step: CrawlAction, fallback_url: str = "") -> str:
         """解析步骤的 URL 来源（实例方法，委托模块级函数）。"""
         return _resolve_target_url(step, fallback_url, self.base_url, self._js_vars)
@@ -995,6 +852,149 @@ def _run_chain_steps(
     def _extract_stream_from_network(self, filter_str: str = "") -> list[str]:
         """从 network_requests 中提取流地址（实例方法，委托模块级函数）。"""
         return _extract_streams(self.client, filter_str)
+
+    def _execute_chain_steps(
+        self,
+        chain: CrawlChain,
+        url: str = "",
+        group: GroupConfig = None,
+        pattern: CrawlPattern = None,
+    ) -> ChainResult:
+        """执行一条链的所有步骤（实例方法，委托模块级函数）。"""
+        return _run_chain_steps(self.client, chain, url, self.base_url, group, self._js_vars)
+
+
+def _resolve_target_url(
+    step: CrawlAction,
+    fallback_url: str,
+    base_url: str,
+    js_vars: dict,
+) -> str:
+    """解析步骤的 URL 来源（worker-safe）。
+
+    优先级:
+      1. url_from → 从 JS 变量取
+      2. url_template → 填充 params 变量槽
+      3. fallback_url → 直接使用传入的链接 URL
+    """
+    if step.url_from and step.url_from in js_vars:
+        return str(js_vars[step.url_from])
+
+    if step.url_template:
+        url = step.url_template
+        params = step.params or {}
+        for key, val in params.items():
+            url = url.replace(f"{{{key}}}", str(val))
+
+        remaining_placeholders = re.findall(r'\{(\w+)\}', url)
+        if remaining_placeholders:
+            _log.debug("url_template 仍有未填充占位符 %s，fallback: %s",
+                       remaining_placeholders, fallback_url[:80] if fallback_url else "(空)")
+            if fallback_url:
+                return fallback_url
+            if not url.startswith(('http://', 'https://')):
+                url = urljoin(base_url, url)
+            return url
+
+        if not url.startswith(('http://', 'https://')):
+            url = urljoin(base_url, url)
+        return url
+
+    return fallback_url
+
+
+def _run_chain_steps(
+    client: BrowserActClient,
+    chain: CrawlChain,
+    url: str,
+    base_url: str,
+    group: GroupConfig,
+    js_vars: dict,
+) -> ChainResult:
+    """执行一条链的所有步骤（worker-safe，不依赖 CrawlEngine 实例）。
+
+    任何步骤导致浏览器 session 丢失时，立即终止当前链并返回已有结果。
+    """
+    result = ChainResult(chain_name=chain.name)
+
+    chain_has_network_capture = any(s.action == "network_capture" for s in chain.steps)
+    if chain_has_network_capture:
+        try:
+            client.network_clear()
+            _log_msg("  network_clear (pre-navigate, chain contains network_capture)")
+        except Exception:
+            pass
+
+    for step in chain.steps:
+        action = step.action
+
+        try:
+            if action == "navigate":
+                target_url = _resolve_target_url(step, url, base_url, js_vars)
+                if target_url:
+                    _log_msg(f"  navigate → {target_url[:80]}")
+                    client.navigate(target_url)
+
+            elif action == "smart_wait":
+                _smart_wait(client, step.selector, timeout=step.timeout, state=step.state)
+
+            elif action == "extract_links":
+                md = client.get_markdown()
+                raw_links = extract_links_from_markdown(md, base_url)
+                lp = group.link_patterns if group else LinkPatterns()
+                if not lp._compiled:
+                    lp.compile()
+                classified = classify_links_by_patterns(raw_links, lp)
+
+                if step.link_type:
+                    result.links = classified.get(step.link_type, [])
+                else:
+                    for lt, links in classified.items():
+                        result.links.extend(links)
+
+            elif action == "extract_images":
+                result.images = client.get_all_image_urls()
+
+            elif action == "network_capture":
+                wait = step.wait_seconds or 5
+                _log_msg(f"  network_capture: 等待 {wait}s 后读取网络请求...")
+                time.sleep(wait)
+                result.streams = _extract_streams(client, step.filter)
+                _log_msg(f"  network_capture: 捕获到 {len(result.streams)} 个流地址")
+
+            elif action == "click":
+                client.click(step.index)
+
+            elif action == "evaluate_js":
+                js_result = client.evaluate_json(step.script)
+                if step.save_as:
+                    js_vars[step.save_as] = js_result
+                    result.js_results[step.save_as] = js_result
+
+            elif action == "scroll":
+                for _ in range(step.times):
+                    if step.direction == "down":
+                        client.scroll_down(500)
+                    else:
+                        client.scroll_top()
+                    time.sleep(step.wait_after or 2)
+
+            elif action == "wait":
+                time.sleep(step.seconds or 3)
+
+        except Exception as e:
+            err_msg = str(e)
+            is_session_lost = any(keyword in err_msg.lower() for keyword in [
+                "no active session", "no active browser", "session not found",
+                "session不存在", "browser closed", "target closed",
+            ])
+            if is_session_lost:
+                _log_msg(f"  浏览器 session 丢失，终止链 '{chain.name}': {e}", "err")
+                break
+            else:
+                _log_msg(f"  步骤 {action} 失败（非致命）: {e}", "warn")
+
+    return result
 
 
 # ── 模块级函数（worker-safe，不绑定 CrawlEngine 实例） ──────
