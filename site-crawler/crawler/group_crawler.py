@@ -211,16 +211,138 @@ def classify_links(
 # ── 列表页爬取（内联自 fast_crawler.py）─────────────────────
 
 def _construct_next_page_url(cur_url: str, current_page: int) -> str:
-    """基于当前 URL 模式构造下一页 URL。"""
+    """基于当前 URL 模式构造下一页 URL。
+
+    参考 fast_crawler.py 和实际测试结果，支持以下模式：
+
+    MacCMS 站点格式（实测 mimimi.top）：
+      - 第1页: 12-----------.html    (11 dash)
+      - 第2页: 12--------2---.html   (8 dash + 页码 + "---" 尾部)
+      - 第3页: 12--------3---.html   (8 dash + 页码 + "---" 尾部)
+
+    公式: body_len = compressed_dash_count + 1 - 3 - len(str(page_number))
+
+    其他通用格式：
+      - /category/X.html → /category/X-2.html
+      - ?page=1 → ?page=2
+      - /page/1 → /page/2
+    """
     next_page = current_page + 1
-    m = re.match(r'^(.*---)' + str(current_page) + r'(-+\.html)$', cur_url)
-    if not m and current_page == 1:
-        m2 = re.match(r'^(.*---)(-+\.html)$', cur_url)
-        if m2:
-            dashes = m2.group(2).replace('.html', '')
-            return f"{m2.group(1)}2{dashes[1:]}.html"
+
+    # ── MacCMS 格式 ──
+
+    # 模式 A：已含页码（如 12--------2---.html）
+    # 页码嵌在 dash 段中，带 "---" 尾部
+    m = re.match(r'^(https?://[^/]+/[^/]+/\d+)(-+)(\d+)(---)(\.html)$', cur_url)
     if m:
-        return f"{m.group(1)}{next_page}{m.group(2)}"
+        prefix, dashes_before, page_str, tail, suffix = m.groups()
+        # 页码位数变化时，dash 前段自动调整
+        new_dash_len = len(dashes_before) + len(page_str) - len(str(next_page))
+        if new_dash_len >= 0:
+            return f"{prefix}{'-' * new_dash_len}{next_page}{tail}{suffix}"
+        return ""
+
+    # 模式 B：第1页纯 dash（如 12-----------.html）
+    # 公式：body = (dash_count+1) - 3 - len(str(next_page))
+    m = re.match(r'^(https?://[^/]+/[^/]+/\d+)(-+)(\.html)$', cur_url)
+    if m:
+        prefix, dashes, suffix = m.groups()
+        dash_count = len(dashes)
+        tail = "---"
+        body_len = dash_count + 1 - len(tail) - len(str(next_page))
+        if body_len >= 0:
+            return f"{prefix}{'-' * body_len}{next_page}{tail}{suffix}"
+        # dash 太少，简单替换
+        if dash_count >= 1:
+            return f"{prefix}{dashes[:-1]}{next_page}{suffix}"
+        return ""
+
+    # ── 通用格式（来自 fast_crawler.py）──
+
+    # 模式 C: /category/X.html → /category/X-2.html
+    m = re.match(r'^(.*?/\w+/\d+)\.html$', cur_url)
+    if m and current_page == 1:
+        return f"{m.group(1)}-{next_page}.html"
+    m = re.match(r'^(.*?/\w+/\d+)-\d+\.html$', cur_url)
+    if m:
+        return f"{m.group(1)}-{next_page}.html"
+
+    # 模式 D: ?page=N
+    m = re.search(r'[?&]page=(\d+)', cur_url)
+    if m:
+        return cur_url.replace(f"page={m.group(1)}", f"page={next_page}")
+    if 'page=' not in cur_url and '?' in cur_url:
+        return f"{cur_url}&page={next_page}"
+    if '?' not in cur_url:
+        return f"{cur_url}?page={next_page}"
+
+    # 模式 E: /page/N
+    m = re.search(r'/page/(\d+)', cur_url)
+    if m:
+        return cur_url.replace(f"/page/{m.group(1)}", f"/page/{next_page}")
+
+    return ""
+
+
+def _find_next_page_url_from_content(
+    md: str,
+    snap: StateSnapshot,
+    cur_url: str,
+    page_num: int,
+) -> str:
+    """从页面内容中提取下一页链接（比 URL 构造更可靠）。
+
+    搜索策略：
+    1. 在 markdown 链接中找文字为 "下一页"/"Next"/"›"/数字 的链接
+    2. 在 state 元素中找类似的按钮/链接
+    3. 过滤：URL 必须与当前页同域，且不是当前页 URL
+    """
+    next_keywords = {"下一页", "下页", "next", "next page", "›", "»", ">", "more", "更多"}
+    cur_domain = urlparse(cur_url).hostname
+    cur_path = urlparse(cur_url).path
+
+    # 策略 1：从 markdown 链接中搜索
+    md_links = extract_links_from_markdown(md, cur_url)
+    for link in md_links:
+        text = link["text"].strip().lower()
+        url = link["url"]
+
+        # 文字是 "下一页" 等关键词
+        if text in next_keywords:
+            link_domain = urlparse(url).hostname
+            if link_domain and link_domain == cur_domain and url != cur_url:
+                _logger.debug("翻页链接(markdown关键词): text=%s, url=%s", text, url[:80])
+                return url
+
+        # 文字是纯数字（页码），且大于当前页
+        if text.isdigit() and int(text) == page_num + 1:
+            link_domain = urlparse(url).hostname
+            if link_domain and link_domain == cur_domain and url != cur_url:
+                _logger.debug("翻页链接(markdown页码): text=%s, url=%s", text, url[:80])
+                return url
+
+    # 策略 2：从 state 元素中搜索
+    next_page_num = page_num + 1
+    for el in snap.elements:
+        text = el.text.strip().lower()
+        if not text:
+            continue
+        href = el.attributes.get("href", "")
+        if not href:
+            continue
+        full_url = urljoin(cur_url, href)
+
+        # 同域 + 不是当前页
+        el_domain = urlparse(full_url).hostname
+        if not el_domain or el_domain != cur_domain or full_url == cur_url:
+            continue
+
+        # 文字匹配
+        if text in next_keywords or (text.isdigit() and int(text) == next_page_num):
+            _logger.debug("翻页链接(state元素): text=%s, url=%s", text, full_url[:80])
+            return full_url
+
+    _logger.debug("页面内容中未找到翻页链接: cur_url=%s, page=%d", cur_url[:60], page_num)
     return ""
 
 
@@ -263,20 +385,45 @@ def crawl_list_pages_inline(
 
         pages.append(page)
 
-        # 翻页逻辑（简化版，只处理 button_next 和 url 构造）
+        # 翻页逻辑：三种策略依次尝试
+        # 策略 1：从页面内容提取翻页链接 URL（最可靠）
+        # 策略 2：点击翻页按钮/页码元素（有些按钮无 href，需 click）
+        # 策略 3：URL 模式构造（fallback）
         next_url = ""
+        clicked_next = False
         if page_num < max_pages:
-            next_url = _construct_next_page_url(cur_url, page_num)
+            # 策略 1：提取翻页链接 URL
+            next_url = _find_next_page_url_from_content(md, snap, cur_url, page_num)
+            if next_url:
+                _log(f"  → 翻页URL(页面内容): {next_url[:80]}")
 
-        if next_url:
-            _log(f"  → 下一页: {next_url[:60]}")
+            # 策略 2：点击翻页按钮（按钮无 href 时使用）
+            if not next_url:
+                pag = snap.find_pagination_info()
+                next_el = pag.get("next_element")
+                if next_el:
+                    _log(f"  → 翻页(点击按钮): [{next_el.index}] {next_el.text!r}")
+                    try:
+                        sg.client.click(next_el.index)
+                        _smart_sleep(sg.client, "a[href*='/vodplay/'], a[href*='/arttype/'], .vodlist-item, .item, article, main", wait_seconds)
+                        clicked_next = True
+                    except Exception as e:
+                        _log(f"  翻页点击失败: {e}", "err")
+
+            # 策略 3：URL 构造 fallback
+            if not next_url and not clicked_next:
+                next_url = _construct_next_page_url(cur_url, page_num)
+                if next_url:
+                    _log(f"  → 翻页URL(构造): {next_url[:80]}")
+
+        if next_url and not clicked_next:
             try:
                 sg.navigate(next_url)
                 _smart_sleep(sg.client, "a[href*='/vodplay/'], a[href*='/arttype/'], .vodlist-item, .item, article, main", wait_seconds)
             except Exception as e:
-                _log(f"  翻页失败: {e}", "err")
+                _log(f"  翻页导航失败: {e}", "err")
                 break
-        else:
+        elif not next_url and not clicked_next:
             _log("  无更多页面")
             break
 
