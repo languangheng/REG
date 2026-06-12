@@ -142,7 +142,13 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #0f1117; c
 <!-- Crawl Progress Modal -->
 <div class="progress-overlay" id="progressOverlay">
   <div class="progress-box">
-    <h3 id="progressTitle">爬取中...</h3>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <h3 id="progressTitle" style="margin:0">爬取中...</h3>
+      <div style="display:flex;gap:8px">
+        <button id="stopCrawlBtn" onclick="stopCrawl()" style="background:#ef4444;color:#fff;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px">⏹ 停止</button>
+        <button onclick="closeProgressModal()" style="background:transparent;border:1px solid #2d3148;color:#9ca3af;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px">✕ 关闭</button>
+      </div>
+    </div>
     <div class="crawl-stats" id="crawlStats" style="display:none;gap:12px;margin-bottom:10px;flex-wrap:wrap">
       <span class="stat-badge">📄 页: <b id="statPages">0</b></span>
       <span class="stat-badge">🎬 视频: <b id="statVideos">0</b></span>
@@ -159,6 +165,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #0f1117; c
 
 <script>
 let sites = [];
+let _crawlSource = null;  // 当前爬取的 EventSource，用于停止
 
 async function loadSites() {
   const resp = await fetch('/api/sites');
@@ -197,6 +204,40 @@ function renderSites() {
   }).join('');
 }
 
+function closeProgressModal() {
+  // 关闭弹窗前先停止爬取
+  if (_crawlSource) {
+    _crawlSource.close();
+    _crawlSource = null;
+  }
+  document.getElementById('progressOverlay').classList.remove('active');
+  loadSites();
+}
+
+function stopCrawl() {
+  if (_crawlSource) {
+    _crawlSource.close();
+    _crawlSource = null;
+  }
+  const log = document.getElementById('progressLog');
+  const el = document.createElement('div');
+  el.className = 'line err';
+  el.textContent = '⏹ 用户手动停止爬取';
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+  document.getElementById('stopCrawlBtn').disabled = true;
+  document.getElementById('stopCrawlBtn').textContent = '已停止';
+}
+
+function appendLog(msg, type) {
+  const log = document.getElementById('progressLog');
+  const el = document.createElement('div');
+  el.className = 'line ' + (type || '');
+  el.textContent = msg;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+}
+
 async function testCrawl(key) {
   document.getElementById('progressTitle').textContent = '爬取中: ' + key;
   document.getElementById('progressLog').innerHTML = '';
@@ -205,13 +246,17 @@ async function testCrawl(key) {
   document.getElementById('crawlCurrent').style.display = 'none';
   document.getElementById('crawlResources').style.display = 'none';
   document.getElementById('crawlResources').innerHTML = '';
+  document.getElementById('stopCrawlBtn').disabled = false;
+  document.getElementById('stopCrawlBtn').textContent = '⏹ 停止';
   document.getElementById('progressOverlay').classList.add('active');
 
   // 重置统计
   let stats = { pages: 0, videos: 0, arts: 0, resources: 0 };
   let crawlState = { total_items: 0, current_item: 0, chain: '' };
 
-  const evtSource = new EventSource('/api/crawl/' + key);
+  _crawlSource = new EventSource('/api/crawl/' + key);
+  evtSource = _crawlSource;
+
   evtSource.onmessage = (e) => {
     const d = JSON.parse(e.data);
 
@@ -221,30 +266,57 @@ async function testCrawl(key) {
       return;
     }
 
-    // 普通日志行
-    const log = document.getElementById('progressLog');
-    const el = document.createElement('div');
-    el.className = 'line ' + (d.type || '');
-    el.textContent = d.msg;
-    log.appendChild(el);
-    log.scrollTop = log.scrollHeight;
+    // 普通日志行（含错误）
+    appendLog(d.msg, d.type || '');
 
     if (d.done) {
       evtSource.close();
+      _crawlSource = null;
       document.getElementById('progressBar').style.width = '100%';
       document.getElementById('crawlStats').style.display = 'none';
       document.getElementById('crawlCurrent').style.display = 'none';
-      setTimeout(() => {
-        document.getElementById('progressOverlay').classList.remove('active');
-        loadSites();
-      }, 2000);
+      document.getElementById('stopCrawlBtn').disabled = true;
+      document.getElementById('stopCrawlBtn').textContent = '已完成';
+      // ❌ 不自动关闭弹窗，让用户手动查看日志
     }
   };
-  evtSource.onerror = () => { evtSource.close(); };
+
+  evtSource.onerror = (e) => {
+    evtSource.close();
+    _crawlSource = null;
+    appendLog('❌ 连接错误，请查看 out/error.log 获取详情', 'err');
+    document.getElementById('stopCrawlBtn').disabled = true;
+    document.getElementById('stopCrawlBtn').textContent = '连接错误';
+  };
 
   function handleCrawlEvent(d) {
-    const log = document.getElementById('progressLog');
     const statsEl = document.getElementById('crawlStats');
+
+    // 所有事件都显示在日志里
+    const eventMsgMap = {
+      'crawl_start': `🚀 开始爬取: ${d.site}，共 ${d.groups} 个分组`,
+      'group_start': `📂 分组 [${d.group_idx}/${d.group_total}]: ${d.group} (${d.resource_type})，${d.entries} 个入口`,
+      'entry_start': `🔗 入口 [${d.entry_idx}/${d.entry_total}]: ${d.entry_name} → ${d.url}`,
+      'entry_done': `✅ 入口 ${d.entry_name} 完成: ${d.pages} 页, ${d.video_links} 视频链接`,
+      'group_skip': `⚠️ 跳过分组 ${d.group}: ${d.reason}`,
+      'group_list_done': `📊 分组 ${d.group} 列表完成: ${d.pages} 页, ${d.video_links} 视频, ${d.art_links} 图片`,
+      'deep_start': `🔍 深度爬取 [${d.chain}]: 共 ${d.total} 项`,
+      'chain_done': `✅ [${d.chain}] 完成: ${d.crawled || 0} 项`,
+      'session_recover': `⚠️ Session 失效，自动恢复...`,
+      'session_ready': `✅ Session 就绪: ${d.title || ''}`,
+      'session_error': `❌ Session 恢复失败: ${d.error || ''}`,
+      'session_init': `🔌 初始化 Session: ${d.url || ''}`,
+      'entry_error': `❌ 入口 ${d.entry_name} 失败: ${d.error || ''}`,
+      'deep_error': `❌ 深度爬取失败 [${d.chain}]: ${d.error || ''}`,
+    };
+
+    const logMsg = eventMsgMap[d.event];
+    if (logMsg) {
+      const logType = d.event.includes('error') || d.event === 'session_error' ? 'err'
+                    : d.event.includes('done') || d.event === 'session_ready' ? 'ok'
+                    : d.event.includes('skip') || d.event === 'session_recover' ? 'warn' : 'info';
+      appendLog(logMsg, logType);
+    }
 
     if (d.event === 'crawl_start') {
       statsEl.style.display = 'flex';
@@ -300,11 +372,15 @@ async function testCrawl(key) {
     else if (d.event === 'crawl_done') {
       document.getElementById('progressBar').style.width = '100%';
       document.getElementById('crawlCurrent').textContent =
-        `📁 结果: ${d.output || ''}`;
-      setTimeout(() => {
-        document.getElementById('progressOverlay').classList.remove('active');
-        loadSites();
-      }, 2500);
+        `📁 结果: ${d.output || '无数据'}`;
+      evtSource.close();
+      _crawlSource = null;
+      document.getElementById('stopCrawlBtn').disabled = true;
+      document.getElementById('stopCrawlBtn').textContent = '✅ 已完成';
+      // ❌ 不自动关闭，等用户手动查看日志后关闭
+    }
+    else if (d.event === 'error') {
+      appendLog(`❌ 错误: ${d.message || d.error || '未知错误'}`, 'err');
     }
   }
 

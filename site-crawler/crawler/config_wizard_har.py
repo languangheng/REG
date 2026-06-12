@@ -228,19 +228,27 @@ class HarWizard:
 
 
 class ConfigGenerator:
-    """从录制会话生成 sites.yaml 配置。"""
+    """从录制会话生成 sites.json 分组格式配置。"""
 
-    def __init__(self, recording: RecordingSession):
+    def __init__(self, recording: RecordingSession, group_name: str = "", resource_type: str = "video"):
         self.rec = recording
+        self.group_name = group_name or "默认分组"
+        self.resource_type = resource_type  # "video" | "art"
 
     def generate(self) -> dict:
-        """生成站点配置字典。"""
+        """生成站点配置字典（分组格式）。"""
+        group = {
+            "name": self.group_name,
+            "resource_type": self.resource_type,
+            "entry_points": self._generate_entry_points(),
+            "link_patterns": self._generate_link_patterns(),
+            "extract_chains": self._generate_extract_chains(),
+        }
+
         config = {
             "name": self.rec.site_name,
             "base_url": self.rec.base_url,
-            "link_patterns": self._generate_link_patterns(),
-            "extract_chains": self._generate_extract_chains(),
-            "entry_points": self._generate_entry_points(),
+            "groups": [group],
         }
         return config
 
@@ -293,90 +301,74 @@ class ConfigGenerator:
                     video_detail.append(self._generalize_path(path))
                     break
 
-        return {
-            "video_detail": video_detail or ["/voddetail/\\d+"],
-            "art_detail": art_detail,
-            "exclude": exclude or ["/vodshow/", "/vodtype/", "/vodsearch/", "/static/"],
-        }
+        result = {}
+        if video_detail:
+            result["video_detail"] = video_detail or ["/voddetail/\\d+"]
+        if art_detail:
+            result["art_detail"] = art_detail
+        if exclude:
+            result["exclude"] = exclude or ["/vodshow/", "/vodtype/", "/vodsearch/", "/static/"]
+
+        return result
 
     def _generate_extract_chains(self) -> dict:
-        """从录制数据生成 extract_chains。"""
+        """从录制数据生成 extract_chains（按 resource_type 使用对应 method）。"""
         chains = {}
 
-        # 视频链
-        if any(s.m3u8_urls or s.mp4_urls for s in self.rec.steps):
+        if self.resource_type == "video":
             chains["video"] = self._generate_video_chain()
-
-        # 图片链
-        if any(s.image_urls for s in self.rec.steps):
+        elif self.resource_type == "art":
             chains["art"] = self._generate_art_chain()
 
         return chains
 
     def _generate_video_chain(self) -> dict:
-        """生成视频提取链。"""
-        # 找到播放页的路径模式
-        play_paths = []
-        detail_paths = []
-        for step in self.rec.steps:
-            path = urlparse(step.url).path
-            if step.m3u8_urls or step.mp4_urls:
-                play_paths.append(path)
-            elif any(kw in path for kw in ["/voddetail/", "/detail/"]):
-                detail_paths.append(path)
-
-        # 生成 extract_js
-        # 详情页：提取播放链接
-        detail_js = """JSON.stringify([...document.querySelectorAll('a')].filter(a => {
-  const href = a.href || '';
-  return href.includes('/vodplay/') || href.includes('/play/');
-}).map(a => ({
-  href: a.href,
-  text: a.textContent.trim().substring(0, 50),
-  class: a.className
-})).filter(a => a.href))"""
-
-        # 播放页：提取流地址（用 iframe 方式，network requests 是运行时方案）
-        play_js = """JSON.stringify((() => {
-  const iframes = [...document.querySelectorAll('iframe')];
-  for (const f of iframes) {
-    const src = f.src || '';
-    if (!src) continue;
-    try {
-      const url = new URL(src);
-      const videoUrl = url.searchParams.get('url');
-      if (videoUrl && (videoUrl.includes('.m3u8') || videoUrl.includes('.mp4') || videoUrl.includes('.flv'))) {
-        return {player_iframe: src, stream_url: videoUrl};
-      }
-    } catch(e) {}
-  }
-  return {player_iframe: null, stream_url: null};
-})())"""
+        """生成视频提取链（network_capture 方式）。"""
+        steps = []
 
         # 检测是否需要中间步骤（详情页 → 播放页）
-        has_detail = bool(detail_paths)
+        has_detail = any(
+            any(kw in urlparse(s.url).path for kw in ["/voddetail/", "/detail/"])
+            for s in self.rec.steps
+            if not s.m3u8_urls and not s.mp4_urls
+        )
 
-        steps = []
+        # 详情页步骤：如果有详情页和播放页的区分，先导航到详情页
         if has_detail:
-            steps.append({"name": "detail", "extract_js": detail_js})
-        steps.append({"name": "play", "extract_js": play_js})
+            steps.append({
+                "name": "enter_detail",
+                "method": "navigate",
+            })
+
+        # 播放步骤：点击播放按钮 + 等待流出现 + 网络捕获
+        steps.append({
+            "name": "capture_stream",
+            "method": "network_capture",
+            "filter": ".m3u8,.mp4,.flv",
+            "wait_seconds": 5,
+        })
 
         return {"steps": steps}
 
     def _generate_art_chain(self) -> dict:
-        """生成图片提取链。"""
-        art_js = """JSON.stringify((() => {
-  const container = document.getElementById('read_tpc') || document.body;
-  return [...container.querySelectorAll('img')]
-    .map(img => img.src || img.dataset.src || img.dataset.original || '')
-    .filter(s => s && !s.startsWith('data:'));
-})())"""
+        """生成图片提取链（network_capture 方式）。"""
+        steps = []
 
-        return {
-            "steps": [
-                {"name": "detail", "extract_js": art_js}
-            ]
-        }
+        # 进入详情页
+        steps.append({
+            "name": "enter_detail",
+            "method": "navigate",
+        })
+
+        # 图片网络捕获
+        steps.append({
+            "name": "capture_images",
+            "method": "network_capture",
+            "filter": ".jpg,.jpeg,.png,.webp,.gif",
+            "wait_seconds": 3,
+        })
+
+        return {"steps": steps}
 
     def _generate_entry_points(self) -> list[dict]:
         """从第一步生成入口点。"""
@@ -386,12 +378,8 @@ class ConfigGenerator:
         first_url = self.rec.steps[0].url
         first_title = self.rec.steps[0].title or "入口"
 
-        # 检测是否有流地址 → video 类型
-        has_video = any(s.m3u8_urls or s.mp4_urls for s in self.rec.steps)
-        entry_type = "video" if has_video else "art"
-
         return [
-            {"name": first_title.split("-")[0].strip()[:20] or "入口", "url": first_url, "type": entry_type}
+            {"name": first_title.split("-")[0].strip()[:20] or "入口", "url": first_url, "type": self.resource_type}
         ]
 
     @staticmethod

@@ -13,6 +13,10 @@ import subprocess
 
 from flask import Flask, render_template, jsonify, request, Response
 
+from crawler.logger import get_logger
+
+log = get_logger("site_manager")
+
 app = Flask(__name__, template_folder=os.path.join(os.path.dirname(__file__), "templates"))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SITES_JSON = os.path.join(BASE_DIR, "sites.json")
@@ -124,10 +128,18 @@ def api_wizard_start():
 @app.route("/api/crawl/<key>", methods=["GET"])
 def api_crawl(key: str):
     """SSE 实时返回爬取进度（调用分组爬虫）。"""
+    log.info("收到爬取请求: site=%s", key)
+
     raw = read_sites_raw()
     sites = raw.get("sites", {})
     if key not in sites:
+        log.error("站点不存在: %s", key)
         return jsonify({"error": "site not found"}), 404
+
+    site_config = sites[key]
+    log.info("站点配置: name=%s, base_url=%s, groups=%d",
+             site_config.get("name", ""), site_config.get("base_url", ""),
+             len(site_config.get("groups", [])))
 
     def generate():
         # SSE 每行格式: data: <json>\n\n
@@ -148,6 +160,8 @@ def api_crawl(key: str):
             "--browser-id", browser_id,
             "--output-dir", os.path.join(BASE_DIR, "output"),
         ]
+        log.info("启动爬取子进程: cmd=%s", " ".join(cmd))
+
         # 显式设置 PYTHONPATH，确保 crawler 包可被导入
         import os as _os
         env = _os.environ.copy()
@@ -161,6 +175,7 @@ def api_crawl(key: str):
             cwd=BASE_DIR,
             env=env,
         )
+        log.info("子进程已启动: pid=%d", proc.pid)
         for line in proc.stdout:
             line = line.strip()
             if not line:
@@ -170,9 +185,11 @@ def api_crawl(key: str):
             if line.startswith("[EVENT] "):
                 try:
                     event_data = json.loads(line[len("[EVENT] "):])
+                    log.debug("SSE事件: %s", event_data.get("event", ""))
                     event_json = json.dumps(event_data, ensure_ascii=False)
                     yield f"data: {event_json}\n\n"
                 except json.JSONDecodeError:
+                    log.warning("SSE事件解析失败: %s", line[:100])
                     msg = json.dumps({"msg": line, "type": "event_err"}, ensure_ascii=False)
                     yield f"data: {msg}\n\n"
                 continue
@@ -183,10 +200,16 @@ def api_crawl(key: str):
                 ltype = "ok"
             elif "❌" in line or "error" in line.lower() or "失败" in line:
                 ltype = "err"
+                log.error("[子进程] %s", line)
+            else:
+                log.debug("[子进程] %s", line)
             msg = json.dumps({"msg": line, "type": ltype}, ensure_ascii=False)
             yield f"data: {msg}\n\n"
 
-        proc.wait()
+        ret = proc.wait()
+        log.info("子进程退出: pid=%d, returncode=%d", proc.pid, ret)
+        if ret != 0:
+            log.error("子进程异常退出: pid=%d, returncode=%d", proc.pid, ret)
         msg = json.dumps({"msg": "爬取完成", "type": "ok", "done": True}, ensure_ascii=False)
         yield f"data: {msg}\n\n"
 
@@ -220,6 +243,7 @@ def api_har_start():
 
     data = request.get_json(force=True)
     url = data.get("url", "").strip()
+    log.info("HAR录制启动请求: url=%s", url)
     # URL 可以为空（复用已有会话时不需要 URL）
 
     try:
@@ -230,6 +254,7 @@ def api_har_start():
         _har_client = BrowserActClient(session="har_wizard", browser_id="direct_local_100797252049567848")
         _har_wizard = HarWizard(_har_client)
         _har_wizard.start(start_url=url, reuse_session=True)
+        log.info("HAR录制启动成功")
 
         # 后台轮询收集数据（stop 时一次性取出）
         import threading
@@ -245,6 +270,7 @@ def api_har_start():
 
         return jsonify({"ok": True})
     except Exception as e:
+        log.error("HAR录制启动失败: %s", e, exc_info=True)
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
@@ -274,10 +300,12 @@ def api_har_events():
 def api_har_stop():
     global _har_wizard
     if not _har_wizard:
+        log.warning("HAR停止录制请求: 未在录制")
         return jsonify({"ok": False, "error": "未在录制"})
 
     try:
         har_path = _har_wizard.stop()
+        log.info("HAR录制停止: har_path=%s", har_path)
         # 构建 summary
         rec = _har_wizard.recording
         steps = []
@@ -305,6 +333,7 @@ def api_har_stop():
             "images": all_images, "apis": all_apis,
         }})
     except Exception as e:
+        log.error("HAR停止失败: %s", e, exc_info=True)
         return jsonify({"ok": False, "error": str(e)})
 
 
@@ -312,6 +341,7 @@ def api_har_stop():
 def api_har_generate():
     global _har_wizard
     if not _har_wizard or not _har_wizard.recording.steps:
+        log.warning("生成配置失败: 没有录制数据")
         return jsonify({"ok": False, "error": "没有录制数据"})
 
     try:
@@ -320,6 +350,7 @@ def api_har_generate():
         data = request.get_json(force=True) if request.is_json else {}
         group_name = data.get("group_name", "").strip()
         resource_type = data.get("resource_type", "video").strip()
+        log.info("生成配置: group_name=%s, resource_type=%s", group_name, resource_type)
 
         gen = ConfigGenerator(_har_wizard.recording,
                               group_name=group_name,
@@ -338,8 +369,10 @@ def api_har_generate():
         # JSON 格式展示（供 UI 预览）
         config_json_str = json.dumps(config, ensure_ascii=False, indent=2)
 
+        log.info("配置生成成功: site_key=%s, config_path=%s", site_key, SITES_JSON)
         return jsonify({"ok": True, "config_path": SITES_JSON, "json": config_json_str, "site_key": site_key})
     except Exception as e:
+        log.error("配置生成失败: %s", e, exc_info=True)
         return jsonify({"ok": False, "error": str(e)})
 
 
@@ -496,6 +529,7 @@ def api_analyze_save():
 
 
 if __name__ == "__main__":
+    log.info("站点管理 UI 启动: host=127.0.0.1, port=5050")
     print("站点管理 UI 启动中...")
     print("请访问: http://localhost:5050")
     app.run(host="127.0.0.1", port=5050, debug=False)

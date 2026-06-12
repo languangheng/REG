@@ -43,6 +43,9 @@ from crawler.browser_act import BrowserActClient, StateSnapshot, StateElement
 from crawler.site_config import SiteConfig, GroupConfig, LinkPatterns, EntryPoint, load_site_config
 from crawler.exporter import JSONExporter
 from crawler.parser import PageLinks
+from crawler.logger import get_logger
+
+_logger = get_logger("group_crawler")
 
 
 # ── 数据结构 ─────────────────────────────────────────────
@@ -71,19 +74,26 @@ class ListPageResult:
 # ── 工具函数 ─────────────────────────────────────────────
 
 def _log(msg: str, ltype: str = ""):
+    """打印日志并写入日志文件。"""
     prefix = ""
     if ltype == "ok":
         prefix = "✅ "
+        _logger.info("%s", msg)
     elif ltype == "err":
         prefix = "❌ "
+        _logger.error("%s", msg)
     elif ltype == "warn":
         prefix = "⚠️ "
+        _logger.warning("%s", msg)
+    else:
+        _logger.info("%s", msg)
     print(f"{prefix}{msg}", flush=True)
 
 
 def _emit(event_type: str, **kwargs):
-    """输出结构化事件，site_manager SSE 端可解析。"""
+    """输出结构化事件，site_manager SSE 端可解析，同时写入日志文件。"""
     payload = json.dumps({"event": event_type, **kwargs}, ensure_ascii=False)
+    _logger.info("[EVENT] %s %s", event_type, json.dumps(kwargs, ensure_ascii=False)[:200])
     print(f"[EVENT] {payload}", flush=True)
 
 

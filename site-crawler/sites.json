@@ -8,16 +8,36 @@
           "name": "视频",
           "resource_type": "video",
           "entry_points": [
-            {"name": "最新", "url": "https://www.mimimi.top/vodshow/12-----------.html", "type": "video"},
-            {"name": "高清无码", "url": "https://www.mimimi.top/vodtype/3.html", "type": "video"}
+            {
+              "name": "熟女人妻",
+              "url": "https://www.mimimi.top/vodshow/12-----------.html",
+              "type": "video"
+            }
           ],
           "link_patterns": {
-            "video_detail": ["/vodplay/", "/voddetail/"],
-            "art_detail": [],
-            "exclude": ["/search", "/login", "/register"]
+            "video_detail": [
+              "/voddetail/\\d+.html"
+            ],
+            "exclude": [
+              "/vodshow/\\d+-----------.html"
+            ]
           },
-          "extract_chains": {},
-          "pagination": {"method": "auto"}
+          "extract_chains": {
+            "video": {
+              "steps": [
+                {
+                  "name": "enter_detail",
+                  "method": "navigate"
+                },
+                {
+                  "name": "capture_stream",
+                  "method": "network_capture",
+                  "filter": ".m3u8,.mp4,.flv",
+                  "wait_seconds": 5
+                }
+              ]
+            }
+          }
         }
       ]
     }
