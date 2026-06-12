@@ -47,6 +47,8 @@ def main():
     ap.add_argument("--session", default="engine_crawl", help="browser-act 会话名")
     ap.add_argument("--browser-id", help="复用已有浏览器 ID")
     ap.add_argument("--output-dir", "-d", default="output", help="输出目录")
+    ap.add_argument("--workers", "-j", type=int, default=1,
+                    help="并行 worker 数（默认 1=串行，推荐 3-4）")
 
     args = ap.parse_args()
 
@@ -89,6 +91,8 @@ def main():
         wait_seconds=args.wait,
         max_pages=max_pages,
         group_name=args.group or "",
+        workers=args.workers,
+        base_session=args.session,
     )
 
     # 导出结果

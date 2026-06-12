@@ -22,6 +22,8 @@ import os
 import re
 import time
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Optional, Any
 from urllib.parse import urlparse, urljoin
@@ -244,6 +246,8 @@ class CrawlEngine:
         wait_seconds: int = 4,
         max_pages: int = 50,
         group_name: str = "",
+        workers: int = 1,
+        base_session: str = "group_crawl",
     ) -> list[CrawlResult]:
         """爬取站点，返回结果列表。
 
@@ -253,6 +257,8 @@ class CrawlEngine:
             wait_seconds: 默认等待秒数
             max_pages: 最大翻页数
             group_name: 指定分组名，空=所有分组
+            workers: 并行 worker 数（仅对深链生效），1=串行
+            base_session: worker session 命名前缀
         """
         # 筛选分组
         if group_name:
@@ -280,6 +286,8 @@ class CrawlEngine:
                 deep_limit=deep_limit,
                 wait_seconds=wait_seconds,
                 max_pages=max_pages,
+                workers=workers,
+                base_session=base_session,
             )
             all_results.extend(results)
 
@@ -299,6 +307,8 @@ class CrawlEngine:
         deep_limit: int = 0,
         wait_seconds: int = 4,
         max_pages: int = 50,
+        workers: int = 1,
+        base_session: str = "group_crawl",
     ) -> list[CrawlResult]:
         """爬取一个分组。"""
         # 获取或推断 crawl_pattern
@@ -352,12 +362,22 @@ class CrawlEngine:
 
             else:
                 # 后续链：用上一条链的输出作为输入
-                chain_results = self._execute_deep_chain(
-                    chain, group, pattern,
-                    input_links=accumulated_links,
-                    wait_seconds=wait_seconds,
-                    per_chain_limit=per_chain_limit,
-                )
+                if workers > 1 and accumulated_links:
+                    chain_results = self._execute_deep_chain_parallel(
+                        chain, group, pattern,
+                        input_links=accumulated_links,
+                        wait_seconds=wait_seconds,
+                        per_chain_limit=per_chain_limit,
+                        workers=workers,
+                        base_session=base_session,
+                    )
+                else:
+                    chain_results = self._execute_deep_chain(
+                        chain, group, pattern,
+                        input_links=accumulated_links,
+                        wait_seconds=wait_seconds,
+                        per_chain_limit=per_chain_limit,
+                    )
                 accumulated_links = chain_results.links
 
             # 如果是最后一条链（通常是 stream_capture），提取最终结果
@@ -489,6 +509,121 @@ class CrawlEngine:
             images=all_images,
         )
 
+    def _execute_deep_chain_parallel(
+        self,
+        chain: CrawlChain,
+        group: GroupConfig,
+        pattern: CrawlPattern,
+        input_links: list[dict],
+        wait_seconds: int = 4,
+        per_chain_limit: int = 0,
+        workers: int = 4,
+        base_session: str = "group_crawl",
+    ) -> ChainResult:
+        """并行执行深链（detail_crawl / stream_capture）。
+
+        每个 worker 线程拥有独立的 BrowserActClient session，
+        将 input_links 均匀分配到各 worker 并行处理。
+        """
+        total = len(input_links)
+        if total == 0:
+            return ChainResult(chain_name=chain.name)
+
+        # 实际 worker 数不超过链接数
+        num_workers = min(workers, total)
+        chunk_size = (total + num_workers - 1) // num_workers
+
+        _log_msg(f"  并行模式: {num_workers} workers, 每 worker ~{chunk_size} 个链接 [共 {total}]")
+
+        # 线程安全的结果收集
+        lock = threading.Lock()
+        all_links: list[dict] = []
+        all_streams: list[str] = []
+        all_images: list[str] = []
+        completed = [0]
+
+        def _worker(worker_idx: int, links_chunk: list[dict]):
+            session_name = f"{base_session}_w{worker_idx}"
+            client = BrowserActClient(session=session_name)
+
+            # 初始化 session
+            if links_chunk:
+                first_url = links_chunk[0].get("url", "")
+                if first_url:
+                    try:
+                        client.ensure_session(first_url, max_wait_cf=90)
+                    except RuntimeError as e:
+                        _log_msg(f"  Worker {worker_idx}: session init 失败: {e}", "err")
+                        return
+
+            local_links = []
+            local_streams = []
+            local_images = []
+
+            for link in links_chunk:
+                url = link.get("url", "")
+                title = link.get("text", "")[:50]
+
+                try:
+                    result = _run_chain_steps(
+                        client, chain, url, self.base_url, group, {}
+                    )
+                    local_links.extend(result.links)
+                    local_streams.extend(result.streams)
+                    local_images.extend(result.images)
+
+                    for stream_url in result.streams:
+                        fmt = "m3u8" if ".m3u8" in stream_url.lower() else "mp4"
+                        _log_msg(f"  [W{worker_idx}] ✅ stream: {stream_url[:80]}", "ok")
+                        _emit("resource_found", type="stream", url=stream_url, title=title, format=fmt)
+                except Exception as e:
+                    _log_msg(f"  [W{worker_idx}] {title[:40]} 失败: {e}", "warn")
+
+            # 线程安全地合并结果
+            with lock:
+                all_links.extend(local_links)
+                all_streams.extend(local_streams)
+                all_images.extend(local_images)
+                completed[0] += len(links_chunk)
+                _emit("deep_progress", completed=completed[0], total=total,
+                      workers=num_workers)
+
+        # 分块并启动线程
+        chunks = []
+        for i in range(num_workers):
+            start = i * chunk_size
+            end = min(start + chunk_size, total)
+            if start < end:
+                chunks.append(input_links[start:end])
+
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = []
+            for i, chunk in enumerate(chunks):
+                futures.append(executor.submit(_worker, i, chunk))
+            for f in as_completed(futures):
+                try:
+                    f.result()  # 传播异常
+                except Exception as e:
+                    _log_msg(f"  Worker 异常: {e}", "err")
+
+        # 应用 per_chain_limit
+        if per_chain_limit > 0:
+            all_links = all_links[:per_chain_limit]
+
+        _emit("chain_done",
+              group=group.name,
+              chain=chain.name,
+              links=len(all_links),
+              streams=len(all_streams),
+              images=len(all_images))
+
+        return ChainResult(
+            chain_name=chain.name,
+            links=all_links,
+            streams=all_streams,
+            images=all_images,
+        )
+
     def _execute_chain_steps(
         self,
         chain: CrawlChain,
@@ -496,150 +631,145 @@ class CrawlEngine:
         group: GroupConfig = None,
         pattern: CrawlPattern = None,
     ) -> ChainResult:
-        """执行一条链的所有步骤。
+        """执行一条链的所有步骤（实例方法，委托模块级函数）。"""
+        return _run_chain_steps(self.client, chain, url, self.base_url, group, self._js_vars)
 
-        任何步骤导致浏览器 session 丢失时，立即终止当前链并返回已有结果，
-        避免后续步骤继续在无效 session 上操作产生连锁错误。
-        """
-        result = ChainResult(chain_name=chain.name)
 
-        # 如果本链包含 network_capture 步骤，在导航前提前清空网络请求记录，
-        # 确保 navigate 过程中产生的流请求（m3u8/mp4/flv）能被捕获到。
-        chain_has_network_capture = any(s.action == "network_capture" for s in chain.steps)
-        if chain_has_network_capture:
-            try:
-                self.client.network_clear()
-                _log_msg("  network_clear (pre-navigate, chain contains network_capture)")
-            except Exception:
-                pass
+def _resolve_target_url(
+    step: CrawlAction,
+    fallback_url: str,
+    base_url: str,
+    js_vars: dict,
+) -> str:
+    """解析步骤的 URL 来源（worker-safe）。
 
-        for step in chain.steps:
-            action = step.action
+    优先级:
+      1. url_from → 从 JS 变量取
+      2. url_template → 填充 params 变量槽
+      3. fallback_url → 直接使用传入的链接 URL
+    """
+    if step.url_from and step.url_from in js_vars:
+        return str(js_vars[step.url_from])
 
-            try:
-                if action == "navigate":
-                    target_url = self._resolve_url(step, url)
-                    if target_url:
-                        _log_msg(f"  navigate → {target_url[:80]}")
-                        self.client.navigate(target_url)
+    if step.url_template:
+        url = step.url_template
+        params = step.params or {}
+        for key, val in params.items():
+            url = url.replace(f"{{{key}}}", str(val))
 
-                elif action == "smart_wait":
-                    _smart_wait(
-                        self.client,
-                        step.selector,
-                        timeout=step.timeout,
-                        state=step.state,
-                    )
-
-                elif action == "extract_links":
-                    md = self.client.get_markdown()
-                    raw_links = extract_links_from_markdown(md, self.base_url)
-                    # 用 link_patterns 分类
-                    lp = group.link_patterns if group else LinkPatterns()
-                    if not lp._compiled:
-                        lp.compile()
-                    classified = classify_links_by_patterns(raw_links, lp)
-
-                    # 按指定的 link_type 提取
-                    if step.link_type:
-                        result.links = classified.get(step.link_type, [])
-                    else:
-                        # 没指定 link_type，取所有非排除链接
-                        for lt, links in classified.items():
-                            result.links.extend(links)
-
-                elif action == "extract_images":
-                    result.images = self.client.get_all_image_urls()
-
-                elif action == "network_capture":
-                    # network_clear 已在链开始前（navigate 之前）执行，
-                    # 此处只需等待播放器加载并读取捕获结果
-                    wait = step.wait_seconds or 5
-                    _log_msg(f"  network_capture: 等待 {wait}s 后读取网络请求...")
-                    time.sleep(wait)
-                    result.streams = self._extract_stream_from_network(step.filter)
-                    _log_msg(f"  network_capture: 捕获到 {len(result.streams)} 个流地址")
-
-                elif action == "click":
-                    self.client.click(step.index)
-
-                elif action == "evaluate_js":
-                    js_result = self.client.evaluate_json(step.script)
-                    if step.save_as:
-                        self._js_vars[step.save_as] = js_result
-                        result.js_results[step.save_as] = js_result
-
-                elif action == "scroll":
-                    for _ in range(step.times):
-                        if step.direction == "down":
-                            self.client.scroll_down(500)
-                        else:
-                            self.client.scroll_top()
-                        time.sleep(step.wait_after or 2)
-
-                elif action == "wait":
-                    time.sleep(step.seconds or 3)
-
-            except Exception as e:
-                err_msg = str(e)
-                # 判断是否是 session 丢失级别的致命错误
-                is_session_lost = any(keyword in err_msg.lower() for keyword in [
-                    "no active session", "no active browser", "session not found",
-                    "session不存在", "browser closed", "target closed",
-                ])
-                if is_session_lost:
-                    _log_msg(f"  浏览器 session 丢失，终止链 '{chain.name}': {e}", "err")
-                    # 立即终止当前链，不再执行后续步骤
-                    break
-                else:
-                    # 非致命错误：记录但继续执行
-                    _log_msg(f"  步骤 {action} 失败（非致命）: {e}", "warn")
-
-        return result
-
-    def _resolve_url(self, step: CrawlAction, fallback_url: str = "") -> str:
-        """解析步骤的 URL 来源。
-
-        优先级:
-          1. url_from → 从 JS 变量取
-          2. url_template → 填充 params 变量槽
-             - 如果模板填充后仍有未替换的 {xxx} 占位符，说明变量来自上一条链的链接，
-               此时应 fallback 到 fallback_url（上一条链传入的实际链接 URL）
-          3. fallback_url → 直接使用上一条链的链接 URL
-        """
-        # 1. url_from: 从 JS 变量取
-        if step.url_from and step.url_from in self._js_vars:
-            return str(self._js_vars[step.url_from])
-
-        # 2. url_template: 填充变量槽
-        if step.url_template:
-            url = step.url_template
-            # 用 params 填充变量
-            params = step.params or {}
-            for key, val in params.items():
-                url = url.replace(f"{{{key}}}", str(val))
-
-            # 检查是否仍有未替换的占位符（如 {id}, {sid}, {eid}）
-            remaining_placeholders = re.findall(r'\{(\w+)\}', url)
-            if remaining_placeholders:
-                # 模板中的占位符来自上一条链的链接数据，无法从 params 填充
-                # 直接使用 fallback_url（上一条链传入的实际链接 URL）
-                _log.debug("url_template 仍有未填充占位符 %s，fallback 到实际链接 URL: %s",
-                           remaining_placeholders, fallback_url[:80] if fallback_url else "(空)")
-                if fallback_url:
-                    return fallback_url
-                # fallback_url 也为空 → 补全 base_url 后返回模板（可能导航到无效 URL）
-                if not url.startswith(('http://', 'https://')):
-                    url = urljoin(self.base_url, url)
-                return url
-
-            # 全部占位符已填充 → 补全 base_url
+        remaining_placeholders = re.findall(r'\{(\w+)\}', url)
+        if remaining_placeholders:
+            _log.debug("url_template 仍有未填充占位符 %s，fallback: %s",
+                       remaining_placeholders, fallback_url[:80] if fallback_url else "(空)")
+            if fallback_url:
+                return fallback_url
             if not url.startswith(('http://', 'https://')):
-                url = urljoin(self.base_url, url)
+                url = urljoin(base_url, url)
             return url
 
-        # 3. fallback
-        return fallback_url
+        if not url.startswith(('http://', 'https://')):
+            url = urljoin(base_url, url)
+        return url
+
+    return fallback_url
+
+
+def _run_chain_steps(
+    client: BrowserActClient,
+    chain: CrawlChain,
+    url: str,
+    base_url: str,
+    group: GroupConfig,
+    js_vars: dict,
+) -> ChainResult:
+    """执行一条链的所有步骤（worker-safe，不依赖 CrawlEngine 实例）。
+
+    任何步骤导致浏览器 session 丢失时，立即终止当前链并返回已有结果。
+    """
+    result = ChainResult(chain_name=chain.name)
+
+    chain_has_network_capture = any(s.action == "network_capture" for s in chain.steps)
+    if chain_has_network_capture:
+        try:
+            client.network_clear()
+            _log_msg("  network_clear (pre-navigate, chain contains network_capture)")
+        except Exception:
+            pass
+
+    for step in chain.steps:
+        action = step.action
+
+        try:
+            if action == "navigate":
+                target_url = _resolve_target_url(step, url, base_url, js_vars)
+                if target_url:
+                    _log_msg(f"  navigate → {target_url[:80]}")
+                    client.navigate(target_url)
+
+            elif action == "smart_wait":
+                _smart_wait(client, step.selector, timeout=step.timeout, state=step.state)
+
+            elif action == "extract_links":
+                md = client.get_markdown()
+                raw_links = extract_links_from_markdown(md, base_url)
+                lp = group.link_patterns if group else LinkPatterns()
+                if not lp._compiled:
+                    lp.compile()
+                classified = classify_links_by_patterns(raw_links, lp)
+
+                if step.link_type:
+                    result.links = classified.get(step.link_type, [])
+                else:
+                    for lt, links in classified.items():
+                        result.links.extend(links)
+
+            elif action == "extract_images":
+                result.images = client.get_all_image_urls()
+
+            elif action == "network_capture":
+                wait = step.wait_seconds or 5
+                _log_msg(f"  network_capture: 等待 {wait}s 后读取网络请求...")
+                time.sleep(wait)
+                result.streams = _extract_streams(client, step.filter)
+                _log_msg(f"  network_capture: 捕获到 {len(result.streams)} 个流地址")
+
+            elif action == "click":
+                client.click(step.index)
+
+            elif action == "evaluate_js":
+                js_result = client.evaluate_json(step.script)
+                if step.save_as:
+                    js_vars[step.save_as] = js_result
+                    result.js_results[step.save_as] = js_result
+
+            elif action == "scroll":
+                for _ in range(step.times):
+                    if step.direction == "down":
+                        client.scroll_down(500)
+                    else:
+                        client.scroll_top()
+                    time.sleep(step.wait_after or 2)
+
+            elif action == "wait":
+                time.sleep(step.seconds or 3)
+
+        except Exception as e:
+            err_msg = str(e)
+            is_session_lost = any(keyword in err_msg.lower() for keyword in [
+                "no active session", "no active browser", "session not found",
+                "session不存在", "browser closed", "target closed",
+            ])
+            if is_session_lost:
+                _log_msg(f"  浏览器 session 丢失，终止链 '{chain.name}': {e}", "err")
+                break
+            else:
+                _log_msg(f"  步骤 {action} 失败（非致命）: {e}", "warn")
+
+    return result
+
+    def _resolve_url(self, step: CrawlAction, fallback_url: str = "") -> str:
+        """解析步骤的 URL 来源（实例方法，委托模块级函数）。"""
+        return _resolve_target_url(step, fallback_url, self.base_url, self._js_vars)
 
     def _try_pagination(
         self,
@@ -722,55 +852,55 @@ class CrawlEngine:
         return ""
 
     def _extract_stream_from_network(self, filter_str: str = "") -> list[str]:
-        """从 network_requests 中提取流地址。
+        """从 network_requests 中提取流地址（实例方法，委托模块级函数）。"""
+        return _extract_streams(self.client, filter_str)
 
-        策略：
-          1. 一次性获取所有网络请求（不传 filter，避免遗漏）
-          2. 按 XHR/Fetch 优先顺序筛选包含流扩展名的 URL
-          3. filter_str 用于额外过滤（如只要 .m3u8），为空则接受所有流格式
-        """
-        stream_exts = [".m3u8", ".mp4", ".flv"]
-        # 已知跳转代理域名 / 非真实流地址模式
-        _redirect_denylist = ["aojiexi.com", "jx.618g.com", "jx.m3u8.tv"]
-        streams = []
 
-        # 一次性拉取所有请求，不在 browser_act 层过滤（避免多轮调用）
-        all_reqs = self.client.network_requests()
+# ── 模块级函数（worker-safe，不绑定 CrawlEngine 实例） ──────
 
-        def _is_redirect_proxy(url: str) -> bool:
-            """检测是否为跳转代理/解析接口（非真实流地址）。"""
-            u = url.lower()
-            for domain in _redirect_denylist:
-                if domain in u:
-                    return True
-            # ?url= 参数模式（常见跳转代理格式）
-            if "?url=" in u and not any(u.endswith(ext) or f"{ext}?" in u for ext in stream_exts):
+def _extract_streams(client: BrowserActClient, filter_str: str = "") -> list[str]:
+    """从 network_requests 中提取流地址（worker-safe）。
+
+    策略：
+      1. 一次性获取所有网络请求（不传 filter，避免遗漏）
+      2. 按 XHR/Fetch 优先顺序筛选包含流扩展名的 URL
+      3. filter_str 用于额外过滤（如只要 .m3u8），为空则接受所有流格式
+    """
+    stream_exts = [".m3u8", ".mp4", ".flv"]
+    _redirect_denylist = ["aojiexi.com", "jx.618g.com", "jx.m3u8.tv"]
+    streams = []
+
+    all_reqs = client.network_requests()
+
+    def _is_redirect_proxy(url: str) -> bool:
+        u = url.lower()
+        for domain in _redirect_denylist:
+            if domain in u:
                 return True
+        if "?url=" in u and not any(u.endswith(ext) or f"{ext}?" in u for ext in stream_exts):
+            return True
+        return False
+
+    def _is_stream_url(url: str) -> bool:
+        u = url.lower()
+        if _is_redirect_proxy(url):
             return False
+        if filter_str:
+            return any(f.strip() in u for f in filter_str.split(","))
+        return any(ext in u for ext in stream_exts)
 
-        def _is_stream_url(url: str) -> bool:
-            u = url.lower()
-            if _is_redirect_proxy(url):
-                return False
-            if filter_str:
-                # filter_str 形如 ".m3u8,.mp4,.flv"
-                return any(f.strip() in u for f in filter_str.split(","))
-            return any(ext in u for ext in stream_exts)
-
-        # 优先：XHR/Fetch
-        for r in all_reqs:
-            if r.get("resource_type") in ("XHR", "Fetch"):
-                url = r.get("url", "")
-                if _is_stream_url(url) and url not in streams:
-                    streams.append(url)
-
-        # 次优先：其他类型（媒体资源、脚本内嵌请求等）
-        for r in all_reqs:
+    for r in all_reqs:
+        if r.get("resource_type") in ("XHR", "Fetch"):
             url = r.get("url", "")
-            if _is_stream_url(url) and url not in streams and "player.js" not in url.lower():
+            if _is_stream_url(url) and url not in streams:
                 streams.append(url)
 
-        return streams
+    for r in all_reqs:
+        url = r.get("url", "")
+        if _is_stream_url(url) and url not in streams and "player.js" not in url.lower():
+            streams.append(url)
+
+    return streams
 
     def _convert_to_crawl_results(
         self,

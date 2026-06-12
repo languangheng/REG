@@ -85,6 +85,7 @@ def _crawl_with_engine(
     output_dir: str = ".",
     session: str = "group_crawl",
     browser_id: str = "",
+    workers: int = 1,
 ) -> str:
     """使用 CrawlEngine 爬取站点。"""
     from crawler.engine import CrawlEngine
@@ -117,6 +118,8 @@ def _crawl_with_engine(
         wait_seconds=wait_seconds,
         max_pages=max_pages,
         group_name=group_name or "",
+        workers=workers,
+        base_session=session,
     )
 
     # 导出结果
@@ -167,6 +170,7 @@ def crawl_site_by_groups(
     output_dir: str = ".",
     session: str = "group_crawl",
     browser_id: str = "",
+    workers: int = 1,
 ) -> str:
     """按分组配置爬取站点，返回输出文件路径。
 
@@ -183,7 +187,7 @@ def crawl_site_by_groups(
 
     return _crawl_with_engine(
         site_config, group_name, deep_limit, wait_seconds,
-        max_pages, output_dir, session, browser_id,
+        max_pages, output_dir, session, browser_id, workers=workers,
     )
 
 
@@ -199,6 +203,8 @@ def main():
     ap.add_argument("--session", default="group_crawl", help="browser-act 会话名")
     ap.add_argument("--browser-id", help="复用已有浏览器 ID")
     ap.add_argument("--output-dir", "-d", default="output", help="输出目录")
+    ap.add_argument("--workers", "-j", type=int, default=1,
+                    help="并行 worker 数（默认 1=串行，推荐 3-4）")
 
     args = ap.parse_args()
 
@@ -216,6 +222,7 @@ def main():
         output_dir=args.output_dir,
         session=args.session,
         browser_id=args.browser_id,
+        workers=args.workers,
     )
 
     if output:
