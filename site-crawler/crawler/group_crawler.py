@@ -45,6 +45,18 @@ from crawler.exporter import JSONExporter
 from crawler.parser import PageLinks
 from crawler.logger import get_logger
 
+# ── Windows 控制台 GBK 编码兜底 ─────────────────────────────────────────────
+# 子进程 stdout 被 site_manager 当作 SSE 管道读取，必须是 UTF-8；
+# 若在 Windows 终端直接运行，GBK 编码无法输出 emoji，需提前把 stdout/stderr
+# 重新配置为 UTF-8，否则 print() 会抛 UnicodeEncodeError。
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except (OSError, AttributeError):
+        pass  # 某些环境（如已关闭的管道）不支持 reconfigure，忽略
+# ─────────────────────────────────────────────────────────────────────────────────
+
 _logger = get_logger("group_crawler")
 
 
@@ -73,8 +85,8 @@ class ListPageResult:
 
 # ── 工具函数 ─────────────────────────────────────────────
 
-def _log(msg: str, ltype: str = ""):
-    """打印日志并写入日志文件。"""
+def _log(msg: str, ltype: str = "") -> None:
+    """打印日志并写入日志文件。同时写 SSE 管道（stdout）。"""
     prefix = ""
     if ltype == "ok":
         prefix = "✅ "
@@ -88,15 +100,30 @@ def _log(msg: str, ltype: str = ""):
     else:
         _logger.info("%s", msg)
     # stdout 保留输出给 SSE 管道（子进程 stdout 被 site_manager 读取）
-    print(f"{prefix}{msg}", flush=True)
+    # 用 buffer.write 直接写 UTF-8 字节，彻底绕过 Windows GBK 控制台编码问题
+    _safe_print(f"{prefix}{msg}")
 
 
-def _emit(event_type: str, **kwargs):
+def _emit(event_type: str, **kwargs) -> None:
     """输出结构化事件，site_manager SSE 端可解析，同时写入日志文件。"""
     payload = json.dumps({"event": event_type, **kwargs}, ensure_ascii=False)
     _logger.info("[EVENT] %s %s", event_type, json.dumps(kwargs, ensure_ascii=False)[:200])
-    # stdout 保留输出给 SSE 管道
-    print(f"[EVENT] {payload}", flush=True)
+    _safe_print(f"[EVENT] {payload}")
+
+
+def _safe_print(text: str) -> None:
+    """编码安全的打印：优先 UTF-8 字节写入，Windows GBK 控制台兜底。"""
+    try:
+        # 直接写 UTF-8 字节到 stdout buffer，绕过控制台编码
+        sys.stdout.buffer.write((text + "\n").encode("utf-8"))
+        sys.stdout.buffer.flush()
+    except (AttributeError, OSError):
+        # 无 buffer（如 mock）或管道已关闭，降级为 print
+        try:
+            print(text, flush=True)
+        except UnicodeEncodeError:
+            # Windows GBK 控制台最后的兜底：替换无法编码的字符
+            print(text.encode("gbk", errors="replace").decode("gbk"), flush=True)
 
 
 def _smart_sleep(client: BrowserActClient, selector: str, seconds: float):

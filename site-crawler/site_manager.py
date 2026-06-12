@@ -166,6 +166,8 @@ def api_crawl(key: str):
         import os as _os
         env = _os.environ.copy()
         env["PYTHONPATH"] = BASE_DIR + _os.pathsep + env.get("PYTHONPATH", "")
+        # 强制子进程 stdout/stderr 用 UTF-8，避免 Windows GBK 控制台 emoji 编码崩溃
+        env["PYTHONIOENCODING"] = "utf-8"
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
