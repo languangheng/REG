@@ -9,8 +9,13 @@
           "resource_type": "video",
           "entry_points": [
             {
-              "name": "熟女人妻",
+              "name": "mimimi.top/vodshow/1",
               "url": "https://www.mimimi.top/vodshow/12-----------.html",
+              "type": "video"
+            },
+            {
+              "name": "入口2",
+              "url": "https://www.mimimi.top/vodtype/3.html",
               "type": "video"
             }
           ],
@@ -18,17 +23,20 @@
             "video_detail": [
               "/voddetail/\\d+.html"
             ],
+            "play_page": [
+              "/vodplay/\\d+-\\d+-\\d+.html",
+              "/play/\\d+-\\d+-\\d+.html"
+            ],
             "exclude": [
-              "/vodshow/\\d+-----------.html"
+              "/vodshow/",
+              "/vodtype/",
+              "/vodsearch/",
+              "/static/"
             ]
           },
           "extract_chains": {
             "video": {
               "steps": [
-                {
-                  "name": "enter_detail",
-                  "method": "navigate"
-                },
                 {
                   "name": "capture_stream",
                   "method": "network_capture",
@@ -37,9 +45,73 @@
                 }
               ]
             }
+          },
+          "crawl_pattern": {
+            "list_crawl": {
+              "steps": [
+                {
+                  "action": "navigate",
+                  "url_template": "/vodshow/{cat}-----------.html"
+                },
+                {
+                  "action": "smart_wait",
+                  "selector": "a[href*='/voddetail/'], .vodlist-item, .stui-vodlist__box"
+                },
+                {
+                  "action": "extract_links",
+                  "source": "markdown",
+                  "link_type": "video_detail"
+                }
+              ],
+              "pagination": {
+                "methods": [
+                  "button_click",
+                  "url_construct"
+                ],
+                "url_construct": {
+                  "formula": "maccms",
+                  "url_template": "/vodshow/{cat}--------{page}---.html"
+                }
+              }
+            },
+            "detail_crawl": {
+              "steps": [
+                {
+                  "action": "navigate",
+                  "url_template": "/voddetail/{id}.html"
+                },
+                {
+                  "action": "smart_wait",
+                  "selector": "a[href*='/vodplay/'], .playlist, .stui-vodlist__play"
+                },
+                {
+                  "action": "extract_links",
+                  "source": "markdown",
+                  "link_type": "play_page"
+                }
+              ]
+            },
+            "stream_capture": {
+              "steps": [
+                {
+                  "action": "navigate",
+                  "url_template": "/vodplay/{id}-{sid}-{eid}.html"
+                },
+                {
+                  "action": "smart_wait",
+                  "selector": "video, iframe[src], .player"
+                },
+                {
+                  "action": "network_capture",
+                  "filter": ".m3u8,.mp4,.flv",
+                  "wait_seconds": 5
+                }
+              ]
+            }
           }
         }
-      ]
+      ],
+      "site_type": "maccms"
     }
   }
 }

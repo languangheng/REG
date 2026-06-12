@@ -36,25 +36,16 @@ def load_sites() -> list:
         # 分组信息
         groups = []
         for g in val.get("groups", []):
-            chains_raw = g.get("extract_chains", {})
-            chain_names = list(chains_raw.keys()) if isinstance(chains_raw, dict) else []
             groups.append({
                 "name": g.get("name", ""),
                 "resource_type": g.get("resource_type", ""),
                 "entry_points": g.get("entry_points", []),
-                "extract_chains": chain_names,
+                "crawl_pattern": bool(g.get("crawl_pattern")),
             })
 
-        # 兼容旧格式（无 groups 字段）
         if not groups:
-            chains_raw = val.get("extract_chains", {})
-            chain_names = list(chains_raw.keys()) if isinstance(chains_raw, dict) else []
-            groups.append({
-                "name": "默认分组",
-                "resource_type": "video",
-                "entry_points": val.get("entry_points", []),
-                "extract_chains": chain_names,
-            })
+            _log.warning(f"站点 '{key}' 无 groups 字段，跳过")
+            continue
 
         result.append({
             "key": key,
@@ -125,6 +116,87 @@ def api_wizard_start():
     return jsonify({"ok": True})
 
 
+@app.route("/api/crawl/test/<key>", methods=["GET"])
+def api_crawl_test(key: str):
+    """SSE 实时返回 DFS 验证爬取进度（引擎驱动，只走 3-4 页面快速验证）。"""
+    log.info("收到验证爬取请求: site=%s", key)
+
+    raw = read_sites_raw()
+    sites = raw.get("sites", {})
+    if key not in sites:
+        log.error("站点不存在: %s", key)
+        return jsonify({"error": "site not found"}), 404
+
+    def generate():
+        msg = json.dumps({"msg": f"开始验证爬取 {key}（DFS模式）...", "type": "info"}, ensure_ascii=False)
+        yield f"data: {msg}\n\n"
+
+        # 调用引擎爬虫（DFS 验证模式）
+        browser_id = "direct_local_100797252049567848"
+        cmd = [
+            sys.executable,
+            "-m", "crawler.engine_cli",
+            "--site", key,
+            "--mode", "dfs",
+            "--browser-id", browser_id,
+            "--output-dir", os.path.join(BASE_DIR, "output"),
+        ]
+        log.info("启动验证爬取子进程: cmd=%s", " ".join(cmd))
+
+        import os as _os
+        env = _os.environ.copy()
+        env["PYTHONPATH"] = BASE_DIR + _os.pathsep + env.get("PYTHONPATH", "")
+        env["PYTHONIOENCODING"] = "utf-8"
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            encoding="utf-8",
+            errors="replace",
+            cwd=BASE_DIR,
+            env=env,
+        )
+        log.info("验证子进程已启动: pid=%d", proc.pid)
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+
+            # 解析 [EVENT] 结构化事件
+            if line.startswith("[EVENT] "):
+                try:
+                    event_data = json.loads(line[len("[EVENT] "):])
+                    log.debug("SSE事件: %s", event_data.get("event", ""))
+                    event_json = json.dumps(event_data, ensure_ascii=False)
+                    yield f"data: {event_json}\n\n"
+                except json.JSONDecodeError:
+                    log.warning("SSE事件解析失败: %s", line[:100])
+                    msg = json.dumps({"msg": line, "type": "event_err"}, ensure_ascii=False)
+                    yield f"data: {msg}\n\n"
+                continue
+
+            # 普通日志行
+            ltype = ""
+            if "✅" in line or "OK" in line.lower() or "stream" in line.lower():
+                ltype = "ok"
+            elif "❌" in line or "error" in line.lower() or "失败" in line:
+                ltype = "err"
+                log.error("[验证子进程] %s", line)
+            else:
+                log.debug("[验证子进程] %s", line)
+            msg = json.dumps({"msg": line, "type": ltype}, ensure_ascii=False)
+            yield f"data: {msg}\n\n"
+
+        ret = proc.wait()
+        log.info("验证子进程退出: pid=%d, returncode=%d", proc.pid, ret)
+
+        success = ret == 0
+        msg = json.dumps({"msg": f"验证完成 ({'成功' if success else '失败'})", "type": "ok" if success else "err", "done": True, "mode": "dfs", "success": success}, ensure_ascii=False)
+        yield f"data: {msg}\n\n"
+
+    return Response(generate(), mimetype="text/event-stream")
+
+
 @app.route("/api/crawl/<key>", methods=["GET"])
 def api_crawl(key: str):
     """SSE 实时返回爬取进度（调用分组爬虫）。"""
@@ -153,7 +225,6 @@ def api_crawl(key: str):
             sys.executable,
             "-m", "crawler.group_crawler",
             "--site", key,
-            "--deep",
             "--deep-limit", "0",
             "--wait", "4",
             "--max-pages", "50",
@@ -506,20 +577,9 @@ def api_analyze_save():
     config = cached["config"]
     site_key = config.get("name", url.replace("https://", "").replace("http://", "").split("/")[0].replace(".", "_"))
 
-    # 将旧格式配置转换为分组格式
+    # 配置必须有 groups 字段
     if "groups" not in config:
-        group = {
-            "name": "默认分组",
-            "resource_type": "video",  # auto_config 默认视频
-        }
-        # 提取分组级字段
-        for field_name in ("entry_points", "link_patterns", "extract_chains", "pagination"):
-            if field_name in config:
-                group[field_name] = config.pop(field_name)
-        config["groups"] = [group]
-        # 移除旧的顶层字段
-        config.pop("network_first", None)
-        config.pop("_extra_categories", None)
+        return jsonify({"ok": False, "error": "配置缺少 groups 字段，请重新生成"}), 400
 
     raw = read_sites_raw()
     if "sites" not in raw:

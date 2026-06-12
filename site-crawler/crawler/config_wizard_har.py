@@ -246,7 +246,12 @@ class HarWizard:
 
 
 class ConfigGenerator:
-    """从录制会话生成 sites.json 分组格式配置。"""
+    """从录制会话生成 sites.json 分组格式配置。
+
+    支持 site_type 检测：
+    - 已知类型（如 maccms）：用内置默认链配置加速生成
+    - 未知类型：从录制数据自动推断链结构
+    """
 
     def __init__(self, recording: RecordingSession, group_name: str = "", resource_type: str = "video"):
         self.rec = recording
@@ -254,7 +259,10 @@ class ConfigGenerator:
         self.resource_type = resource_type  # "video" | "art"
 
     def generate(self) -> dict:
-        """生成站点配置字典（分组格式）。"""
+        """生成站点配置字典（分组格式 + 链式操作路径）。"""
+        # 检测 site_type
+        site_type = self._detect_site_type()
+
         group = {
             "name": self.group_name,
             "resource_type": self.resource_type,
@@ -263,11 +271,30 @@ class ConfigGenerator:
             "extract_chains": self._generate_extract_chains(),
         }
 
+        # 已知 site_type → 用内置默认链配置
+        if site_type == "maccms":
+            from crawler.site_config import MACCMS_CRAWL_PATTERN, MACCMS_LINK_PATTERNS
+            group["crawl_pattern"] = MACCMS_CRAWL_PATTERN
+            # 合并 link_patterns
+            inferred_lp = group.get("link_patterns", {})
+            for key in ("video_detail", "play_page", "exclude"):
+                if key not in inferred_lp and key in MACCMS_LINK_PATTERNS:
+                    inferred_lp[key] = MACCMS_LINK_PATTERNS[key]
+            group["link_patterns"] = inferred_lp
+        else:
+            # 未知类型 → 从录制数据推断链结构
+            crawl_pattern = self._infer_crawl_pattern_from_recording()
+            if crawl_pattern:
+                group["crawl_pattern"] = crawl_pattern
+
         config = {
             "name": self.rec.site_name,
             "base_url": self.rec.base_url,
             "groups": [group],
         }
+        if site_type:
+            config["site_type"] = site_type
+
         return config
 
     def _generate_link_patterns(self) -> dict:
@@ -430,6 +457,91 @@ class ConfigGenerator:
         # 3. middle_raw 整体替换为 \\d+，不论内容是什么
         #    （包含分类分隔符 + 页码 + 其他字符，统一泛化）
         return f"{prefix}{cat_id}\\d+{suffix}"
+
+    def _detect_site_type(self) -> str:
+        """从录制数据的 URL 模式检测站点类型。"""
+        paths = [urlparse(s.url).path for s in self.rec.steps]
+
+        # MacCMS 特征：/vodshow/ + /voddetail/ + /vodplay/
+        has_vodshow = any("/vodshow/" in p for p in paths)
+        has_voddetail = any("/voddetail/" in p for p in paths)
+        has_vodplay = any("/vodplay/" in p for p in paths)
+        if has_vodshow and (has_voddetail or has_vodplay):
+            return "maccms"
+
+        # WordPress 特征：/wp-content/ + /category/
+        has_wp = any("/wp-content/" in p for p in paths)
+        has_cat = any("/category/" in p for p in paths)
+        if has_wp and has_cat:
+            return "wordpress"
+
+        return ""  # 未知类型
+
+    def _infer_crawl_pattern_from_recording(self) -> dict:
+        """从录制数据推断链式操作路径（未知类型时使用）。"""
+        chains = {}
+        chain_order = []
+        chain_count = 0
+
+        for i, step in enumerate(self.rec.steps):
+            url_path = urlparse(step.url).path
+
+            if step.m3u8_urls or step.mp4_urls:
+                # 有流 → 最后一条链是 stream_capture
+                if "/play/" in url_path or "/vodplay/" in url_path:
+                    wait_sel = "video, iframe[src], .player"
+                else:
+                    wait_sel = ".player, video, iframe[src]"
+
+                chains["stream_capture"] = {
+                    "steps": [
+                        {"action": "navigate", "url_template": self._generalize_path(url_path)},
+                        {"action": "smart_wait", "selector": wait_sel},
+                        {"action": "network_capture", "filter": ".m3u8,.mp4,.flv", "wait_seconds": 5},
+                    ]
+                }
+                chain_order.append("stream_capture")
+                break
+            else:
+                # 无流 → 中间链
+                chain_name = "list_crawl" if chain_count == 0 else f"level_{chain_count}"
+                generalized = self._generalize_path(url_path)
+                wait_sel = self._infer_selector_from_path(url_path)
+
+                chains[chain_name] = {
+                    "steps": [
+                        {"action": "navigate", "url_template": generalized},
+                        {"action": "smart_wait", "selector": wait_sel},
+                        {"action": "extract_links", "source": "markdown", "link_type": "next_level"},
+                    ]
+                }
+                if chain_count == 0:
+                    chains[chain_name]["pagination"] = {
+                        "methods": ["button_click", "url_construct"],
+                        "max_pages": 100,
+                    }
+                chain_order.append(chain_name)
+                chain_count += 1
+
+        if not chains:
+            return {}
+
+        result = {}
+        for name in chain_order:
+            result[name] = chains[name]
+        return result
+
+    def _infer_selector_from_path(self, path: str) -> str:
+        """从 URL 路径推断合适的 wait selector。"""
+        if "/vodshow/" in path or "/vodtype/" in path:
+            return "a[href*='/voddetail/'], .vodlist-item, .stui-vodlist__box"
+        if "/voddetail/" in path or "/detail/" in path:
+            return "a[href*='/vodplay/'], .playlist, .stui-vodlist__play"
+        if "/vodplay/" in path or "/play/" in path:
+            return "video, iframe[src], .player"
+        if "/category/" in path:
+            return "a[href*='/detail/'], .item, .card"
+        return "a[href], .item, article, main"
 
 
 # ── 主入口 ───────────────────────────────────────────────

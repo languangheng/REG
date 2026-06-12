@@ -88,6 +88,27 @@ class BrowserActClient:
         browsers = self.list_browsers()
         return browsers[0]["id"] if browsers else None
 
+    def _create_browser(self) -> str:
+        """创建新浏览器并返回 browser_id。"""
+        env = os.environ.copy()
+        env["PATH"] = os.path.expanduser("~/.local/bin") + os.pathsep + env.get("PATH", "")
+        result = subprocess.run(
+            [self._cmd, "browser", "create", "--type=chrome-direct"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=env,
+        )
+        output = result.stdout + result.stderr
+        m = re.search(r'id=(\S+)', output)
+        if m:
+            bid = m.group(1)
+            self.browser_id = bid
+            _log.info("新建浏览器成功: browser_id=%s", bid)
+            return bid
+        _log.error("新建浏览器失败: output=%s", output[:200])
+        raise RuntimeError(f"创建浏览器失败: {output}")
+
     def open(self, url: str) -> str:
         bid = self.browser_id or self.get_first_browser_id()
         if not bid:
@@ -108,6 +129,35 @@ class BrowserActClient:
             _log.warning("session检查失败: session=%s, error=%s", self.session, e)
             return False
 
+    @staticmethod
+    def _title_looks_like_url(title: str, target_url: str = "") -> bool:
+        """检测页面标题是否为纯 URL 文本（页面未正确渲染的标志）。
+
+        例如: "mimimi.top/vodshow/12-----------.html" 这类标题说明页面还没加载完。
+        """
+        if not title:
+            return False
+        t = title.strip()
+        # 标题以 http:// 或 https:// 开头
+        if t.startswith("http://") or t.startswith("https://"):
+            return True
+        # 标题包含目标 URL 的域名 + 路径，且标题就是 URL 片段
+        if target_url:
+            from urllib.parse import urlparse
+            try:
+                pu = urlparse(target_url)
+                host = pu.netloc.replace("www.", "")
+                path = pu.path.strip("/")
+                # 检查标题是否包含完整域名路径
+                if host in t and path and path[:20] in t:
+                    return True
+            except Exception:
+                pass
+        # 标题非常短且像路径（含 / 但无空格）
+        if "/" in t and " " not in t and len(t) < 80:
+            return True
+        return False
+
     def ensure_session(self, url: str = "", max_wait_cf: int = 60) -> "StateSnapshot":
         """确保会话可用。优先复用已有 session，避免不必要的 browser open（减少 CF 触发）。
 
@@ -126,34 +176,80 @@ class BrowserActClient:
         # 第一层：session list 检查（不依赖页面状态，不会因临时超时误判）
         session_alive = self._session_exists()
 
+        navigate_ok = False
         if session_alive:
             _log.info("session存活，直接导航: session=%s, url=%s", self.session, url or "(无)")
             # Session 还在，直接导航（同站导航不触发 CF）
             if url:
                 try:
                     self._run("navigate", url, timeout=30)
+                    navigate_ok = True
                 except RuntimeError:
                     # navigate 失败可能只是临时问题，再试一次
                     _log.warning("navigate首次失败，重试: url=%s", url)
                     time.sleep(2)
-                    self._run("navigate", url, timeout=30)
-        else:
-            _log.warning("session失效，需重建: session=%s, url=%s", self.session, url or "(无)")
-            # Session 真的丢了，重建
-            bid = self.browser_id or self.get_first_browser_id()
-            if not bid:
-                raise RuntimeError("没有可用的浏览器")
-            if url:
-                self._run("browser", "open", bid, url, timeout=60)
-                # session 重建后，导入已保存的 Cookie，刷新页面可能跳过 CF
-                self.load_cookies(url)
-                # 导入 Cookie 后刷新页面，让 Cookie 生效
-                try:
-                    self._run("reload", timeout=30)
-                except RuntimeError:
-                    pass
-            else:
+                    try:
+                        self._run("navigate", url, timeout=30)
+                        navigate_ok = True
+                    except RuntimeError:
+                        _log.warning("navigate重试仍失败，session可能已断连，回退到重建: session=%s", self.session)
+
+        if not navigate_ok:
+            # 两种情况：session 不存在，或 session 存在但 navigate 失败（假阳性）
+            if not session_alive:
+                _log.warning("session失效，需重建: session=%s, url=%s", self.session, url or "(无)")
+            if not url:
                 raise RuntimeError("需要提供 url 来重建会话")
+
+            # 多级回退：browser-act daemon 可能保留了僵尸连接（no close frame），
+            # 需要清理旧 session 后逐级尝试更激进的手段来获取可用浏览器。
+            rebuild_ok = False
+            last_error = None
+            for attempt in range(1, 4):
+                try:
+                    # 第一轮之后，先清理旧 session 释放僵尸资源
+                    if attempt > 1:
+                        try:
+                            self.close_session()
+                            time.sleep(1)
+                        except Exception:
+                            pass
+
+                    # 获取 browser_id（三级回退）
+                    if attempt == 1:
+                        bid = self.browser_id or self.get_first_browser_id()
+                    elif attempt == 2:
+                        bid = self.get_first_browser_id()
+                    else:
+                        # 创建新浏览器
+                        bid = self._create_browser()
+
+                    if not bid and attempt < 3:
+                        _log.warning("未找到可用浏览器，继续尝试: attempt=%d", attempt)
+                        continue
+
+                    if not bid:
+                        raise RuntimeError("没有可用的浏览器（3次尝试均未找到）")
+
+                    self._run("browser", "open", bid, url, timeout=60)
+                    rebuild_ok = True
+                    _log.info("session重建成功: attempt=%d, bid=%s", attempt, bid)
+                    break
+                except RuntimeError as e:
+                    last_error = e
+                    _log.warning("session重建失败 (attempt %d/3): %s", attempt, str(e)[:120])
+                    time.sleep(1)
+
+            if not rebuild_ok:
+                raise RuntimeError(f"session重建失败（3次尝试均失败）: {last_error}")
+
+            # session 重建后，导入已保存的 Cookie，刷新页面可能跳过 CF
+            self.load_cookies(url)
+            # 导入 Cookie 后刷新页面，让 Cookie 生效
+            try:
+                self._run("reload", timeout=30)
+            except RuntimeError:
+                pass
 
         # 等 CF 通过
         for i in range(max_wait_cf // 3):
@@ -162,6 +258,12 @@ class BrowserActClient:
                 snap = self.parsed_state()
                 t = snap.title.lower()
                 if "moment" not in t and "稍候" not in t and "verify" not in t and "checking" not in t:
+                    # 二次校验：标题不能是纯 URL 文本（页面未正确渲染的标志）
+                    if self._title_looks_like_url(snap.title, url):
+                        if session_alive and i < (max_wait_cf // 3) - 1:
+                            _log.warning("标题看起来像URL（页面未正确渲染），等待重新加载: title=%s", snap.title[:50])
+                            continue  # 再等一轮
+                        # 如果已经是重建的 session 或超时在即，接受这个状态
                     # CF 通过，自动保存 Cookie 供下次复用
                     _log.info("CF验证通过: url=%s, title=%s", url or snap.url, snap.title[:50])
                     if url:
@@ -181,27 +283,7 @@ class BrowserActClient:
             # Fallback: open browser first
             bid = self.browser_id or self.get_first_browser_id()
             if not bid:
-                # Create new browser
-                import subprocess
-                env = os.environ.copy()
-                env["PATH"] = os.path.expanduser("~/.local/bin") + os.pathsep + env.get("PATH", "")
-                result = subprocess.run(
-                    [self._cmd, "browser", "create", "--type=chrome-direct"],
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                    env=env,
-                )
-                output = result.stdout + result.stderr
-                # Parse browser id from output like "id=xxx"
-                m = re.search(r'id=(\S+)', output)
-                if m:
-                    self.browser_id = m.group(1)
-                    bid = self.browser_id
-                    _log.info("新建浏览器成功: browser_id=%s", bid)
-                else:
-                    _log.error("新建浏览器失败: output=%s", output[:200])
-                    raise RuntimeError(f"Failed to create browser: {output}")
+                bid = self._create_browser()
             return self._run("browser", "open", bid, url, timeout=30)
 
     def wait(self, seconds: int = 10) -> str:
@@ -278,13 +360,17 @@ class BrowserActClient:
         """发送键盘按键（如 Enter, Tab, Escape 等）。"""
         return self._run("keys", key_combo, timeout=10)
 
-    def wait_selector(self, selector: str, state: str = "visible", timeout: int = 30000) -> str:
+    def wait_selector(self, selector: str, state: str = "attached", timeout: int = 30000) -> str:
         """等待指定元素达到目标状态，比 time.sleep 更可靠。
 
         Args:
             selector: CSS 选择器
-            state: 等待状态 - visible/hidden/attached/detached
+            state: 等待状态 - attached(默认，元素在DOM中即可)/visible/hidden/detached
             timeout: 超时时间（毫秒）
+
+        注意：默认用 attached 而非 visible，因为 Playwright 对 visible 要求严格
+        （offsetParent !== null），复合 selector 中若先匹配到不可见元素会超时。
+        attached 只要求元素在 DOM 中，不要求可见，更可靠。
         """
         return self._run(
             "wait", "selector",

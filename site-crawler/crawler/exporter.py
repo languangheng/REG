@@ -81,6 +81,16 @@ class JSONExporter:
 
         if deep_results:
             data["deep_results"] = deep_results
+            # 统计 deep_results 中的资源数量，更新 top-level 字段
+            deep_video = deep_results.get("video", [])
+            deep_art = deep_results.get("art", [])
+            deep_streams = sum(1 for v in deep_video if v.get("stream_url"))
+            deep_images = sum(len(v.get("images", [])) for v in deep_video)
+            deep_images += sum(len(v.get("images", [])) for v in deep_art)
+            data["total_videos"] = max(data["total_videos"], len(deep_video))
+            data["total_images"] = max(data["total_images"], deep_images)
+            # 流数量是独立维度
+            data["total_streams"] = deep_streams
 
         out_path = Path(output_dir) / filename
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -88,88 +98,7 @@ class JSONExporter:
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-        _log.info("导出完成: path=%s, images=%d, videos=%d, arts=%d",
-                  str(out_path), len(all_images), len(all_videos), len(all_arts))
+        _log.info("导出完成: path=%s, images=%d, videos=%d, arts=%d, streams=%d",
+                  str(out_path), data["total_images"], data["total_videos"], data["total_art_details"], data.get("total_streams", 0))
         return str(out_path)
 
-    @staticmethod
-    def print_summary(pages: list[PageLinks], output_path: str) -> None:
-        """打印爬取摘要（同时写入日志文件）。"""
-        total_img = sum(len(p.image_links) for p in pages)
-        total_vid = sum(len(p.video_links) for p in pages)
-        total_art = sum(len(p.art_links) for p in pages)
-
-        unique_img: set[str] = set()
-        unique_vid: set[str] = set()
-        unique_art: set[str] = set()
-        for p in pages:
-            for link in p.image_links:
-                unique_img.add(link["url"])
-            for link in p.video_links:
-                unique_vid.add(link["url"])
-            for link in p.art_links:
-                unique_art.add(link["url"])
-
-        _log.info("爬取摘要: pages=%d, images=%d, videos=%d, arts=%d, output=%s",
-                  len(pages), len(unique_img), len(unique_vid), len(unique_art), output_path)
-
-        print(f"\n{'='*50}")
-        print(f"  爬取完成！")
-        print(f"  总页数: {len(pages)}")
-        print(f"  图片链接: {len(unique_img)} 条 (去重后)")
-        print(f"  视频链接: {len(unique_vid)} 条 (去重后)")
-        print(f"  图片详情页: {len(unique_art)} 条 (去重后)")
-        print(f"  输出文件: {output_path}")
-        print(f"{'='*50}")
-
-        for i, p in enumerate(pages, 1):
-            print(f"  第{i}页: {p.page_url} (图片:{len(p.image_links)} 视频:{len(p.video_links)} 图详情:{len(p.art_links)} 总:{p.total_links})")
-
-        # 图片链接预览
-        if unique_img:
-            img_list = []
-            seen = set()
-            for p in pages:
-                for link in p.image_links:
-                    if link["url"] not in seen:
-                        seen.add(link["url"])
-                        img_list.append(link)
-            print(f"\n🖼️ 图片链接预览 (前10条):")
-            for i, link in enumerate(img_list[:10], 1):
-                print(f"  {i}. {link['url']}")
-            if len(img_list) > 10:
-                print(f"  ... 还有 {len(img_list) - 10} 条")
-
-        # 视频链接预览
-        if unique_vid:
-            vid_list = []
-            seen = set()
-            for p in pages:
-                for link in p.video_links:
-                    if link["url"] not in seen:
-                        seen.add(link["url"])
-                        vid_list.append(link)
-            print(f"\n🎬 视频链接预览 (前10条):")
-            for i, link in enumerate(vid_list[:10], 1):
-                text = link["text"][:40] if link["text"] else "(无文本)"
-                print(f"  {i}. {text}")
-                print(f"     {link['url']}")
-            if len(vid_list) > 10:
-                print(f"  ... 还有 {len(vid_list) - 10} 条")
-
-        # 图片详情页预览
-        if unique_art:
-            art_list = []
-            seen = set()
-            for p in pages:
-                for link in p.art_links:
-                    if link["url"] not in seen:
-                        seen.add(link["url"])
-                        art_list.append(link)
-            print(f"\n🖼️ 图片详情页预览 (前10条):")
-            for i, link in enumerate(art_list[:10], 1):
-                text = link["text"][:50] if link["text"] else "(无文本)"
-                print(f"  {i}. {text}")
-                print(f"     {link['url']}")
-            if len(art_list) > 10:
-                print(f"  ... 还有 {len(art_list) - 10} 条")

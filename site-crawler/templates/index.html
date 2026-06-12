@@ -197,7 +197,8 @@ function renderSites() {
       <div class="base-url">${esc(s.base_url)}</div>
       ${groupsHtml || '<div style="color:#6b7280;font-size:12px">暂无分组</div>'}
       <div class="actions">
-        <button class="btn primary" onclick="testCrawl('${esc(s.key)}')">测试爬取</button>
+        <button class="btn primary" onclick="testCrawl('${esc(s.key)}')">完整爬取</button>
+        <button class="btn" style="border-color:#059669;color:#4ade80" onclick="validateCrawl('${esc(s.key)}')">⚡ 验证</button>
         <button class="btn" onclick="deleteSite('${esc(s.key)}')">删除</button>
       </div>
     </div>`;
@@ -461,6 +462,110 @@ async function submitAddEntry() {
 
 function openHarWizard() {
   window.open('/wizard_har', 'har_wizard', 'width=900,height=700');
+}
+
+// ── DFS 验证爬取 ──────────────────────────────────────
+async function validateCrawl(key) {
+  document.getElementById('progressTitle').textContent = '⚡ 验证爬取: ' + key;
+  document.getElementById('progressLog').innerHTML = '';
+  document.getElementById('progressBar').style.width = '0%';
+  document.getElementById('crawlStats').style.display = 'none';
+  document.getElementById('crawlCurrent').style.display = 'none';
+  document.getElementById('crawlResources').style.display = 'none';
+  document.getElementById('crawlResources').innerHTML = '';
+  document.getElementById('stopCrawlBtn').disabled = false;
+  document.getElementById('stopCrawlBtn').textContent = '⏹ 停止';
+  document.getElementById('progressOverlay').classList.add('active');
+
+  let stats = { pages: 0, resources: 0 };
+  let dfsSuccess = false;
+
+  _crawlSource = new EventSource('/api/crawl/test/' + key);
+  evtSource = _crawlSource;
+
+  evtSource.onmessage = (e) => {
+    const d = JSON.parse(e.data);
+
+    if (d.event) {
+      handleValidateEvent(d);
+      return;
+    }
+
+    appendLog(d.msg, d.type || '');
+
+    if (d.done) {
+      evtSource.close();
+      _crawlSource = null;
+      dfsSuccess = d.success || false;
+      document.getElementById('progressBar').style.width = '100%';
+      document.getElementById('stopCrawlBtn').disabled = true;
+      document.getElementById('stopCrawlBtn').textContent =
+        dfsSuccess ? '✅ 验证成功' : '❌ 验证失败';
+
+      // 标题和状态更新
+      const titleEl = document.getElementById('progressTitle');
+      titleEl.textContent = dfsSuccess
+        ? '✅ 验证成功 — 配置正确'
+        : '❌ 验证失败 — 配置需调整';
+      titleEl.style.color = dfsSuccess ? '#4ade80' : '#f87171';
+    }
+  };
+
+  evtSource.onerror = () => {
+    evtSource.close();
+    _crawlSource = null;
+    appendLog('❌ 连接错误', 'err');
+    document.getElementById('stopCrawlBtn').disabled = true;
+    document.getElementById('stopCrawlBtn').textContent = '连接错误';
+  };
+
+  function handleValidateEvent(d) {
+    const eventMsgMap = {
+      'crawl_start': `⚡ DFS验证: ${d.site} (${d.mode}模式)`,
+      'group_start': `📂 分组: ${d.group} (${d.resource_type}) [${d.mode}]`,
+      'chain_done': `✅ 链完成: ${d.chain} → ${d.links||0}链接, ${d.streams||0}流`,
+      'resource_found': `🔗 ${d.type}: ${d.title || ''}`,
+      'crawl_done': dfsSuccess ? '✅ 验证成功' : '❌ 验证失败',
+      'session_init': `🔌 初始化 Session`,
+      'session_ready': `✅ Session 就绪`,
+      'session_recover': `⚠️ Session 恢复`,
+      'session_error': `❌ Session 失败`,
+    };
+
+    const logMsg = eventMsgMap[d.event];
+    if (logMsg) {
+      const logType = d.event.includes('error') ? 'err'
+                    : d.event.includes('done') || d.event === 'session_ready' ? 'ok'
+                    : d.event.includes('recover') ? 'warn' : 'info';
+      appendLog(logMsg, logType);
+    }
+
+    if (d.event === 'resource_found') {
+      stats.resources++;
+      const resDiv = document.getElementById('crawlResources');
+      resDiv.style.display = 'block';
+      const item = document.createElement('div');
+      item.className = 'resource-item';
+      item.innerHTML = `<span class="res-type">🔗 ${d.type}</span>
+        <span class="res-title">${esc(d.title || '-')}</span>
+        <span class="res-url">${esc(d.url)}</span>`;
+      resDiv.appendChild(item);
+    }
+
+    if (d.event === 'crawl_done') {
+      dfsSuccess = d.success || false;
+      document.getElementById('progressBar').style.width = '100%';
+      document.getElementById('progressTitle').textContent =
+        dfsSuccess ? '✅ 验证成功 — 配置正确' : '❌ 验证失败 — 配置需调整';
+      document.getElementById('progressTitle').style.color =
+        dfsSuccess ? '#4ade80' : '#f87171';
+      evtSource.close();
+      _crawlSource = null;
+      document.getElementById('stopCrawlBtn').disabled = true;
+      document.getElementById('stopCrawlBtn').textContent =
+        dfsSuccess ? '✅ 验证成功' : '❌ 验证失败';
+    }
+  }
 }
 
 // ── Auto Analyze ──────────────────────────────────────
