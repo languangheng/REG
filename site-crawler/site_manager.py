@@ -505,6 +505,59 @@ def api_add_entry(key: str, group_name: str):
     return jsonify({"ok": True, "entry": new_entry})
 
 
+@app.route("/api/sites/<key>/groups/<group_name>", methods=["DELETE"])
+def api_delete_group(key: str, group_name: str):
+    """删除整个分组。"""
+    raw = read_sites_raw()
+    sites = raw.get("sites", {})
+    if key not in sites:
+        return jsonify({"ok": False, "error": f"站点 {key} 不存在"}), 404
+
+    site = sites[key]
+    groups = site.get("groups", [])
+
+    before = len(groups)
+    site["groups"] = [g for g in groups if g.get("name") != group_name]
+
+    if len(site["groups"]) == before:
+        return jsonify({"ok": False, "error": f"分组 '{group_name}' 不存在"}), 404
+
+    save_sites(raw)
+    log.info("删除分组: site=%s, group=%s", key, group_name)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/sites/<key>/groups/<group_name>/entries/<int:entry_index>", methods=["DELETE"])
+def api_delete_entry(key: str, group_name: str, entry_index: int):
+    """删除分组内的单个入口。"""
+    raw = read_sites_raw()
+    sites = raw.get("sites", {})
+    if key not in sites:
+        return jsonify({"ok": False, "error": f"站点 {key} 不存在"}), 404
+
+    site = sites[key]
+    groups = site.get("groups", [])
+
+    target = None
+    for g in groups:
+        if g.get("name") == group_name:
+            target = g
+            break
+
+    if not target:
+        return jsonify({"ok": False, "error": f"分组 '{group_name}' 不存在"}), 404
+
+    entry_points = target.get("entry_points", [])
+    if entry_index < 0 or entry_index >= len(entry_points):
+        return jsonify({"ok": False, "error": f"入口索引 {entry_index} 越界 (共 {len(entry_points)} 个)"}), 400
+
+    removed = entry_points.pop(entry_index)
+    target["entry_points"] = entry_points
+    save_sites(raw)
+    log.info("删除入口: site=%s, group=%s, entry=%s (idx=%d)", key, group_name, removed.get("url", ""), entry_index)
+    return jsonify({"ok": True, "removed": removed})
+
+
 # ── Auto Analyze API ────────────────────────────────
 
 _analyze_result_cache = {}  # url -> {config, json_str}
