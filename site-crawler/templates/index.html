@@ -196,10 +196,25 @@ function renderSites() {
       <h3>${esc(s.name)}</h3>
       <div class="base-url">${esc(s.base_url)}</div>
       ${groupsHtml || '<div style="color:#6b7280;font-size:12px">暂无分组</div>'}
+      <div style="margin-bottom:8px">
+        <button class="add-entry-btn" onclick="openHarWizard('${esc(s.key)}')" style="background:#059669;color:#e0e7ff">＋ 添加分组</button>
+      </div>
       <div class="actions">
         <button class="btn primary" onclick="testCrawl('${esc(s.key)}')">完整爬取</button>
         <button class="btn" style="border-color:#059669;color:#4ade80" onclick="validateCrawl('${esc(s.key)}')">⚡ 验证</button>
         <button class="btn" onclick="deleteSite('${esc(s.key)}')">删除</button>
+      </div>
+      <div style="margin-top:10px;display:flex;align-items:center;gap:8px">
+        <span style="font-size:12px;color:#9ca3af">线程数:</span>
+        <select id="workers-${esc(s.key)}" style="width:56px;padding:4px 6px;background:#0f1117;border:1px solid #2d3148;border-radius:4px;color:#e5e7eb;font-size:12px">
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+          <option value="8">8</option>
+          <option value="10">10</option>
+        </select>
       </div>
     </div>`;
   }).join('');
@@ -255,7 +270,7 @@ async function testCrawl(key) {
   let stats = { pages: 0, videos: 0, arts: 0, resources: 0 };
   let crawlState = { total_items: 0, current_item: 0, chain: '' };
 
-  _crawlSource = new EventSource('/api/crawl/' + key);
+  _crawlSource = new EventSource('/api/crawl/' + key + '?workers=' + getWorkers(key));
   evtSource = _crawlSource;
 
   evtSource.onmessage = (e) => {
@@ -460,8 +475,14 @@ async function submitAddEntry() {
   }
 }
 
-function openHarWizard() {
-  window.open('/wizard_har', 'har_wizard', 'width=900,height=700');
+function openHarWizard(siteKey) {
+  const url = siteKey ? '/wizard_har?site_key=' + encodeURIComponent(siteKey) + '&mode=add_group' : '/wizard_har';
+  window.open(url, 'har_wizard', 'width=900,height=700');
+}
+
+function getWorkers(key) {
+  const sel = document.getElementById('workers-' + key);
+  return sel ? sel.value : '1';
 }
 
 // ── DFS 验证爬取 ──────────────────────────────────────
@@ -480,7 +501,7 @@ async function validateCrawl(key) {
   let stats = { pages: 0, resources: 0 };
   let dfsSuccess = false;
 
-  _crawlSource = new EventSource('/api/crawl/test/' + key);
+  _crawlSource = new EventSource('/api/crawl/test/' + key + '?workers=' + getWorkers(key));
   evtSource = _crawlSource;
 
   evtSource.onmessage = (e) => {

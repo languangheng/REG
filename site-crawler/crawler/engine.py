@@ -224,6 +224,32 @@ def _construct_next_page_url(cur_url: str, current_page: int) -> str:
     return ""
 
 
+def _generate_page_urls(
+    first_page_url: str,
+    pagination,
+    max_pages: int,
+) -> list[str]:
+    """从第 1 页 URL 预计算出第 2..max_pages 页的所有 URL。
+
+    仅在 pagination.methods 包含 "url_construct" 时使用。
+    通过反复调用 _construct_next_page_url 逐页推算，直到生成失败或达到上限。
+
+    Returns: [page2_url, page3_url, ...] — 列表可为空。
+    """
+    if not pagination or "url_construct" not in (pagination.methods or []):
+        return []
+
+    urls = []
+    cur_url = first_page_url
+    for page in range(1, max_pages):
+        next_url = _construct_next_page_url(cur_url, page)
+        if not next_url or not next_url.startswith("http"):
+            break
+        urls.append(next_url)
+        cur_url = next_url
+    return urls
+
+
 # ── 通用引擎 ─────────────────────────────────────────────
 
 class CrawlEngine:
@@ -357,6 +383,8 @@ class CrawlEngine:
                     max_pages=effective_max_pages,
                     wait_seconds=wait_seconds,
                     per_chain_limit=per_chain_limit,
+                    workers=workers,
+                    base_session=base_session,
                 )
                 accumulated_links = chain_results.links
 
@@ -401,8 +429,14 @@ class CrawlEngine:
         max_pages: int = 50,
         wait_seconds: int = 4,
         per_chain_limit: int = 0,
+        workers: int = 1,
+        base_session: str = "group_crawl",
     ) -> ChainResult:
-        """执行第一条链（通常是 list_crawl），遍历 entry_points + 翻页。"""
+        """执行第一条链（list_crawl），遍历 entry_points + 翻页。
+
+        当 workers > 1 且分页方式为 url_construct 时：Page 1 串行爬取建立 session，
+        然后预计算第 2..N 页 URL，多 worker 并行爬取剩余列表页。
+        """
         all_links = []
         seen_urls = set()
 
@@ -414,16 +448,63 @@ class CrawlEngine:
             _log_msg(f"  入口: {ep.name} → {url[:80]}")
             _emit("entry_start", group=group.name, entry_name=ep.name, url=url)
 
-            # 执行链步骤
+            # Page 1 始终串行（获取 session 上下文 + 提取 URL 格式）
+            result = self._execute_chain_steps(chain, url=url, group=group, pattern=pattern)
+
+            for link in result.links:
+                if link["url"] not in seen_urls:
+                    all_links.append(link)
+                    seen_urls.add(link["url"])
+
+            _log_msg(f"  [Page 1] {url[:60]} → {len(result.links)} 链接")
+
+            # DFS 模式：只爬 1 页
+            if max_pages <= 1:
+                break
+
+            # ── 并行翻页分支：url_construct 可预计算 ──
+            can_parallel = (
+                workers > 1
+                and chain.pagination
+                and "url_construct" in (chain.pagination.methods or [])
+            )
+            if can_parallel:
+                try:
+                    snap = self.client.parsed_state()
+                    first_page_url = snap.url
+                except Exception:
+                    first_page_url = url
+
+                page_urls = _generate_page_urls(
+                    first_page_url, chain.pagination, max_pages,
+                )
+                if page_urls:
+                    _log_msg(f"  并行翻页: 预计算 {len(page_urls)} 页 URL → {workers} workers")
+                    parallel_result = self._crawl_list_pages_parallel(
+                        chain, group, page_urls,
+                        workers=workers,
+                        base_session=f"{base_session}_list",
+                    )
+                    for link in parallel_result.links:
+                        if link["url"] not in seen_urls:
+                            all_links.append(link)
+                            seen_urls.add(link["url"])
+                    break  # 所有分页已并行处理完毕
+
+            # ── 串行翻页分支（原逻辑）──
             page_num = 1
-            while page_num <= max_pages:
-                # 执行当前页的步骤
+            while page_num < max_pages:
+                next_url = self._try_pagination(chain, group, page_num, result)
+                if not next_url or not next_url.startswith("http"):
+                    break
+
+                page_num += 1
+                url = next_url
+
                 result = self._execute_chain_steps(chain, url=url, group=group, pattern=pattern)
 
-                # 提取链接
-                new_links = result.links
                 new_count = 0
-                for link in new_links:
+                for link in result.links:
                     if link["url"] not in seen_urls:
                         all_links.append(link)
                         seen_urls.add(link["url"])
@@ -431,19 +512,6 @@ class CrawlEngine:
 
                 _log_msg(f"  [Page {page_num}] {url[:60]} → {new_count} 新链接")
 
-                # DFS 模式：只爬 1 页
-                if max_pages <= 1:
-                    break
-
-                # 翻页
-                next_url = self._try_pagination(chain, group, page_num, result)
-                if not next_url or not next_url.startswith("http"):
-                    break
-
-                url = next_url
-                page_num += 1
-
-                # per_chain_limit 限制
                 if per_chain_limit > 0 and len(all_links) >= per_chain_limit:
                     break
 
@@ -770,6 +838,79 @@ def _run_chain_steps(
     def _resolve_url(self, step: CrawlAction, fallback_url: str = "") -> str:
         """解析步骤的 URL 来源（实例方法，委托模块级函数）。"""
         return _resolve_target_url(step, fallback_url, self.base_url, self._js_vars)
+
+    def _crawl_list_pages_parallel(
+        self,
+        chain: CrawlChain,
+        group: GroupConfig,
+        page_urls: list[str],
+        workers: int = 4,
+        base_session: str = "list_crawl",
+    ) -> ChainResult:
+        """并行爬取多个列表页 — 每个 worker 独立 BrowserActClient session。
+
+        将 page_urls 均分给 N 个 worker 线程，并行导航 + 执行链步骤 + 提取链接，
+        结果去重合并后返回。
+        """
+        total = len(page_urls)
+        num_workers = min(workers, total)
+        chunk_size = (total + num_workers - 1) // num_workers
+
+        _log_msg(f"  列表并行: {num_workers} workers, ~{chunk_size} 页/worker [共 {total} 页]")
+
+        lock = threading.Lock()
+        all_links: list[dict] = []
+        seen = set()
+
+        def _worker(worker_idx: int, urls: list[str]):
+            session_name = f"{base_session}_w{worker_idx}"
+            client = BrowserActClient(session=session_name)
+
+            if urls:
+                try:
+                    client.ensure_session(urls[0], max_wait_cf=90)
+                except RuntimeError as e:
+                    _log_msg(f"  [List W{worker_idx}] session 初始化失败: {e}", "err")
+                    return
+
+            local_links = []
+            for page_url in urls:
+                try:
+                    result = _run_chain_steps(
+                        client, chain, page_url, self.base_url, group, {},
+                    )
+                    local_links.extend(result.links)
+                except Exception as e:
+                    _log_msg(f"  [List W{worker_idx}] {page_url[:60]} 失败: {e}", "warn")
+
+            with lock:
+                added = 0
+                for link in local_links:
+                    if link["url"] not in seen:
+                        all_links.append(link)
+                        seen.add(link["url"])
+                        added += 1
+                _log_msg(f"  [List W{worker_idx}] {len(local_links)} 链接 → {added} 新")
+
+        # 分块
+        chunks = []
+        for i in range(num_workers):
+            start = i * chunk_size
+            end = min(start + chunk_size, total)
+            if start < end:
+                chunks.append(page_urls[start:end])
+
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = []
+            for i, chunk in enumerate(chunks):
+                futures.append(executor.submit(_worker, i, chunk))
+            for f in as_completed(futures):
+                try:
+                    f.result()
+                except Exception as e:
+                    _log_msg(f"  列表 worker 异常: {e}", "err")
+
+        return ChainResult(chain_name=chain.name, links=all_links)
 
     def _try_pagination(
         self,

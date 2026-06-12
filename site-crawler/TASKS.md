@@ -9,37 +9,41 @@
 | BFS 完整爬取测试 | 2026-06-12 | ✅ 翻页正常，数据导出正常 |
 | 深度爬取并行化 — engine.py | 2026-06-12 | ThreadPoolExecutor, workers参数, standalone worker函数 |
 | 深度爬取并行化 — CLI参数 | 2026-06-12 | group_crawler + engine_cli 均支持 --workers |
+| 列表页并行爬取 — engine.py | 2026-06-12 | _crawl_list_pages_parallel() + url预计算 |
+| WebUI 线程数选择器 + 添加分组按钮 | 2026-06-12 | index.html下拉框, site_manager workers参数, add_group模式 |
 
 ## 待办 📋
 
 | 优先级 | 任务 | 状态 |
 |--------|------|------|
-| P0 | 并行爬取端到端测试（4 workers） | 待用户验证 |
+| P0 | 并行爬取端到端测试（4 workers，列表+深度） | 待用户验证 |
 | P1 | HAR 录制→配置生成→爬取全流程自动化验证 | 待开始 |
 
 ---
 
 ## 并行爬取技术细节
 
+### 两层并行
+1. **列表页并行**（`_crawl_list_pages_parallel`）：url_construct 预计算 page 2..N → ThreadPoolExecutor 并行爬取
+2. **深链并行**（`_execute_deep_chain_parallel`）：detail/stream 链 → 每个 link 独立 session worker
+
 ### 架构
 - **worker-safe 函数**：`_run_chain_steps()`, `_resolve_target_url()`, `_extract_streams()` 不绑定 CrawlEngine 实例
+- **预计算**：`_generate_page_urls()` 从第1页URL + url_construct 推算全部分页
 - **Session pool**：每个 worker 创建独立 BrowserActClient（`{base_session}_w{N}`）
 - **结果合并**：`threading.Lock` 保护共享列表
-- **进度事件**：`deep_progress` SSE 事件（completed/total/workers）
 
-### 文件改动
-| 文件 | 改动 | 行数 |
-|------|------|------|
-| `engine.py` | _execute_deep_chain_parallel() + 3个worker-safe函数 | +130 |
-| `group_crawler.py` | --workers CLI + 参数透传 | +6 |
-| `engine_cli.py` | --workers CLI + 参数透传 | +4 |
+### WebUI
+- 每个卡片增加线程数下拉框（1/2/3/4/5/8/10），默认1
+- 完整爬取和⚡验证均读取 workers 值
+- 「＋ 添加分组」按钮 → HAR录制弹窗（mode=add_group, site_key传参）
+- site_manager.py `/api/har/generate` 支持 add_group 模式追加分组
 
 ### 使用
 ```bash
-# 串行（默认，兼容旧行为）
-python -m crawler.group_crawler --site www_mimimi_top
+# WebUI: 选择线程数 → 点击爬取，自动传参
 
-# 4 workers 并行
+# CLI:
 python -m crawler.group_crawler --site www_mimimi_top --workers 4
 ```
 

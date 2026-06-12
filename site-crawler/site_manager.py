@@ -120,6 +120,7 @@ def api_wizard_start():
 def api_crawl_test(key: str):
     """SSE 实时返回 DFS 验证爬取进度（引擎驱动，只走 3-4 页面快速验证）。"""
     log.info("收到验证爬取请求: site=%s", key)
+    workers = request.args.get("workers", "1")
 
     raw = read_sites_raw()
     sites = raw.get("sites", {})
@@ -140,6 +141,7 @@ def api_crawl_test(key: str):
             "--mode", "dfs",
             "--browser-id", browser_id,
             "--output-dir", os.path.join(BASE_DIR, "output"),
+            "--workers", workers,
         ]
         log.info("启动验证爬取子进程: cmd=%s", " ".join(cmd))
 
@@ -201,6 +203,7 @@ def api_crawl_test(key: str):
 def api_crawl(key: str):
     """SSE 实时返回爬取进度（调用分组爬虫）。"""
     log.info("收到爬取请求: site=%s", key)
+    workers = request.args.get("workers", "1")
 
     raw = read_sites_raw()
     sites = raw.get("sites", {})
@@ -230,6 +233,7 @@ def api_crawl(key: str):
             "--max-pages", "50",
             "--browser-id", browser_id,
             "--output-dir", os.path.join(BASE_DIR, "output"),
+            "--workers", workers,
         ]
         log.info("启动爬取子进程: cmd=%s", " ".join(cmd))
 
@@ -423,20 +427,34 @@ def api_har_generate():
         data = request.get_json(force=True) if request.is_json else {}
         group_name = data.get("group_name", "").strip()
         resource_type = data.get("resource_type", "video").strip()
-        log.info("生成配置: group_name=%s, resource_type=%s", group_name, resource_type)
+        mode = data.get("mode", "").strip()
+        target_site_key = data.get("site_key", "").strip()
+        log.info("生成配置: group_name=%s, resource_type=%s, mode=%s, site_key=%s",
+                 group_name, resource_type, mode or "new_site", target_site_key or "(none)")
 
         gen = ConfigGenerator(_har_wizard.recording,
                               group_name=group_name,
                               resource_type=resource_type)
         config = gen.generate()
 
-        site_key = _har_wizard.recording.site_name.replace(".", "_")
+        site_key = target_site_key or _har_wizard.recording.site_name.replace(".", "_")
 
-        # 保存到 sites.json
         raw = read_sites_raw()
         if "sites" not in raw:
             raw["sites"] = {}
-        raw["sites"][site_key] = config
+
+        if mode == "add_group" and target_site_key and target_site_key in raw.get("sites", {}):
+            # 追加分组到已有站点
+            existing_site = raw["sites"][target_site_key]
+            existing_groups = existing_site.setdefault("groups", [])
+            # 用生成的第一个分组（config 是完整站点配置，取 groups[0]）
+            new_group = config.get("groups", [])
+            existing_groups.extend(new_group)
+            log.info("add_group: 站点 %s 新增 %d 个分组，当前共 %d 分组",
+                     target_site_key, len(new_group), len(existing_groups))
+        else:
+            raw["sites"][site_key] = config
+
         save_sites(raw)
 
         # JSON 格式展示（供 UI 预览）
