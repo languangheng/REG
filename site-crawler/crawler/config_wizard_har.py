@@ -23,6 +23,9 @@ from urllib.parse import urlparse
 from typing import Optional
 
 from crawler.browser_act import BrowserActClient, StateSnapshot
+from crawler.logger import get_logger
+
+_log = get_logger("config_wizard_har")
 
 
 # ── 数据收集 ─────────────────────────────────────────────
@@ -78,6 +81,8 @@ class HarWizard:
         
         reuse_session=False 时，导航到 start_url（可能触发 CF 验证）。
         """
+        _log.info("HAR录制启动: reuse_session=%s, start_url=%s", reuse_session, start_url or "(无)")
+
         if not reuse_session and start_url:
             self.client.navigate(start_url)
             time.sleep(3)
@@ -85,7 +90,9 @@ class HarWizard:
             # 确保有活跃会话 — navigate 到当前页即可
             try:
                 snapshot = self.client.parsed_state()
-            except Exception:
+                _log.info("复用已有会话: url=%s, title=%s", snapshot.url, snapshot.title)
+            except Exception as e:
+                _log.warning("会话不存在，需要创建: %s", e)
                 # 会话不存在，用 navigate 创建（会自动选浏览器）
                 if start_url:
                     self.client.navigate(start_url)
@@ -103,6 +110,7 @@ class HarWizard:
         self._last_url = snapshot.url
         self.recording.site_name = urlparse(snapshot.url).netloc
         self.recording.add_step(snapshot.url, snapshot.title)
+        _log.info("录制开始: url=%s, site_name=%s", snapshot.url, self.recording.site_name)
 
         return f"录制开始: {snapshot.url}\n请在浏览器中自由浏览，路径会自动记录\n完成后点击「停止录制」"
 
@@ -117,6 +125,7 @@ class HarWizard:
 
         if snapshot.url != self._last_url:
             step = self.recording.add_step(snapshot.url, snapshot.title)
+            _log.info("页面变化: url=%s, title=%s", snapshot.url, snapshot.title)
 
             # 检测流地址
             for ext in [".m3u8", ".mp4", ".flv"]:
@@ -145,6 +154,7 @@ class HarWizard:
     def stop(self, har_path: str = "") -> str:
         """停止录制并保存 HAR。"""
         self._running = False
+        _log.info("停止录制: steps=%d", len(self.recording.steps))
 
         # 最后一次检查流地址
         if self.recording.steps:
@@ -164,13 +174,17 @@ class HarWizard:
             har_path = str(Path.home() / ".qclaw" / "workspace-tfxjjhfnjialcuju" / "site-crawler" / f"{self.recording.site_name}_har.json")
         try:
             result = self.client.har_stop(har_path)
+            _log.info("HAR保存成功: path=%s", har_path)
             return f"HAR 已保存: {har_path}\n{result}"
         except Exception as e:
+            _log.error("HAR保存失败: %s", e)
             return f"HAR 保存失败: {e}"
 
     def run_interactive(self, start_url: str) -> dict:
         """交互式录制：Python 控制台引导用户操作。"""
-        print(self.start(start_url))
+        _log.info("交互式录制启动: url=%s", start_url)
+        start_msg = self.start(start_url)
+        print(start_msg)
 
         try:
             while self._running:
@@ -195,6 +209,7 @@ class HarWizard:
 
                 time.sleep(2)
         except KeyboardInterrupt:
+            _log.warning("录制被用户中断")
             print("\n录制中断")
 
         har_result = self.stop()
@@ -202,12 +217,15 @@ class HarWizard:
 
         # 生成配置
         config = self.generate_config()
+        _log.info("交互式录制完成: steps=%d", len(self.recording.steps))
         return config
 
     def _print_status(self):
         """打印当前录制状态。"""
+        status = "进行中" if self._running else "已停止"
+        _log.info("录制状态: %s, site=%s, steps=%d", status, self.recording.site_name, len(self.recording.steps))
         print(f"\n{'='*50}")
-        print(f"  录制状态: {'进行中' if self._running else '已停止'}")
+        print(f"  录制状态: {status}")
         print(f"  站点: {self.recording.site_name}")
         print(f"  步骤: {len(self.recording.steps)}")
         for i, step in enumerate(self.recording.steps, 1):
@@ -433,6 +451,7 @@ def main():
     if not start_url:
         start_url = input("请输入起始 URL: ").strip()
     if not start_url:
+        _log.warning("未提供 URL，退出")
         print("未提供 URL，退出")
         return
 
@@ -448,6 +467,7 @@ def main():
     yaml_content = {site_key: config}
     yaml_str = yaml.dump({"sites": yaml_content}, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
+    _log.info("配置生成完成: site_key=%s", site_key)
     print(f"\n{'='*60}")
     print(f"  生成的 sites.yaml 配置:")
     print(f"{'='*60}")
@@ -458,6 +478,7 @@ def main():
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("# 自动生成的站点配置 — HAR 配置向导\n")
         f.write(yaml_str)
+    _log.info("配置已保存: path=%s", output_path)
     print(f"\n  已保存到: {output_path}")
 
 

@@ -11,6 +11,10 @@ from dataclasses import dataclass, field
 from typing import Optional
 from urllib.parse import urlparse
 
+from crawler.logger import get_logger
+
+_log = get_logger("browser_act")
+
 
 class BrowserActClient:
     """封装 browser-act CLI，提供通用浏览器自动化操作。"""
@@ -20,6 +24,7 @@ class BrowserActClient:
         self.browser_id = browser_id
         self._cmd = self._find_cli()
         self._cookie_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tmp", "cookies")
+        _log.info("BrowserActClient初始化: session=%s, browser_id=%s", session, browser_id or "(自动)")
 
     @staticmethod
     def _find_cli() -> str:
@@ -57,6 +62,7 @@ class BrowserActClient:
         output = result.stdout + result.stderr
         output = re.sub(r"^browser-act\s*:\s*", "", output, flags=re.MULTILINE)
         if result.returncode != 0 and "Error" in output:
+            _log.error("browser-act命令失败: cmd=%s, output=%s", args[0] if args else "?", output.strip()[:200])
             raise RuntimeError(f"browser-act 命令失败: {output.strip()}")
         return output.strip()
 
@@ -96,8 +102,10 @@ class BrowserActClient:
             for line in raw.splitlines():
                 if f"session_name: {self.session}" in line:
                     return True
+            _log.debug("session不存在: session=%s", self.session)
             return False
-        except RuntimeError:
+        except RuntimeError as e:
+            _log.warning("session检查失败: session=%s, error=%s", self.session, e)
             return False
 
     def ensure_session(self, url: str = "", max_wait_cf: int = 60) -> "StateSnapshot":
@@ -119,15 +127,18 @@ class BrowserActClient:
         session_alive = self._session_exists()
 
         if session_alive:
+            _log.info("session存活，直接导航: session=%s, url=%s", self.session, url or "(无)")
             # Session 还在，直接导航（同站导航不触发 CF）
             if url:
                 try:
                     self._run("navigate", url, timeout=30)
                 except RuntimeError:
                     # navigate 失败可能只是临时问题，再试一次
+                    _log.warning("navigate首次失败，重试: url=%s", url)
                     time.sleep(2)
                     self._run("navigate", url, timeout=30)
         else:
+            _log.warning("session失效，需重建: session=%s, url=%s", self.session, url or "(无)")
             # Session 真的丢了，重建
             bid = self.browser_id or self.get_first_browser_id()
             if not bid:
@@ -152,18 +163,21 @@ class BrowserActClient:
                 t = snap.title.lower()
                 if "moment" not in t and "稍候" not in t and "verify" not in t and "checking" not in t:
                     # CF 通过，自动保存 Cookie 供下次复用
+                    _log.info("CF验证通过: url=%s, title=%s", url or snap.url, snap.title[:50])
                     if url:
                         self.save_cookies(url)
                     return snap
             except RuntimeError:
                 continue
+        _log.error("CF验证超时: url=%s, max_wait=%ds", url, max_wait_cf)
         raise RuntimeError(f"CF 验证超时 ({max_wait_cf}s)")
 
     def navigate(self, url: str) -> str:
         """导航到 URL。若 session 不存在则先打开浏览器。"""
         try:
             return self._run("navigate", url, timeout=30)
-        except RuntimeError:
+        except RuntimeError as e:
+            _log.warning("navigate失败，尝试fallback: url=%s, error=%s", url, str(e)[:100])
             # Fallback: open browser first
             bid = self.browser_id or self.get_first_browser_id()
             if not bid:
@@ -184,7 +198,9 @@ class BrowserActClient:
                 if m:
                     self.browser_id = m.group(1)
                     bid = self.browser_id
+                    _log.info("新建浏览器成功: browser_id=%s", bid)
                 else:
+                    _log.error("新建浏览器失败: output=%s", output[:200])
                     raise RuntimeError(f"Failed to create browser: {output}")
             return self._run("browser", "open", bid, url, timeout=30)
 
@@ -315,6 +331,7 @@ class BrowserActClient:
         os.makedirs(self._cookie_dir, exist_ok=True)
         filepath = os.path.join(self._cookie_dir, f"{domain}.json")
         result = self.cookies_export(filepath)
+        _log.debug("Cookie保存: domain=%s, path=%s", domain, filepath)
         return filepath
 
     def load_cookies(self, url: str) -> str:
@@ -331,7 +348,9 @@ class BrowserActClient:
         domain = urlparse(url).hostname
         filepath = os.path.join(self._cookie_dir, f"{domain}.json")
         if not os.path.isfile(filepath):
+            _log.debug("无已保存Cookie: domain=%s", domain)
             return "no_saved_cookies"
+        _log.debug("导入Cookie: domain=%s", domain)
         return self.cookies_import(filepath)
 
     def evaluate_js(self, js_code: str) -> str:

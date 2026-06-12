@@ -4,6 +4,9 @@ import json
 import re
 from pathlib import Path
 from crawler.parser import PageLinks
+from crawler.logger import get_logger
+
+_log = get_logger("exporter")
 
 
 def sanitize_filename(title: str, max_length: int = 50) -> str:
@@ -27,6 +30,8 @@ class JSONExporter:
         title = pages[0].page_title if pages else "crawl_result"
         short_title = title.split('-')[0].strip() if '-' in title else title
         filename = sanitize_filename(short_title) + ".json"
+
+        _log.info("导出开始: title=%s, filename=%s, pages=%d", title, filename, len(pages))
 
         # 合并所有链接（分类去重）
         all_images: list[dict] = []
@@ -83,11 +88,13 @@ class JSONExporter:
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
+        _log.info("导出完成: path=%s, images=%d, videos=%d, arts=%d",
+                  str(out_path), len(all_images), len(all_videos), len(all_arts))
         return str(out_path)
 
     @staticmethod
     def print_summary(pages: list[PageLinks], output_path: str) -> None:
-        """打印爬取摘要。"""
+        """打印爬取摘要（同时写入日志文件）。"""
         total_img = sum(len(p.image_links) for p in pages)
         total_vid = sum(len(p.video_links) for p in pages)
         total_art = sum(len(p.art_links) for p in pages)
@@ -102,6 +109,9 @@ class JSONExporter:
                 unique_vid.add(link["url"])
             for link in p.art_links:
                 unique_art.add(link["url"])
+
+        _log.info("爬取摘要: pages=%d, images=%d, videos=%d, arts=%d, output=%s",
+                  len(pages), len(unique_img), len(unique_vid), len(unique_art), output_path)
 
         print(f"\n{'='*50}")
         print(f"  爬取完成！")

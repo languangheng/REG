@@ -87,6 +87,7 @@ def _log(msg: str, ltype: str = ""):
         _logger.warning("%s", msg)
     else:
         _logger.info("%s", msg)
+    # stdout 保留输出给 SSE 管道（子进程 stdout 被 site_manager 读取）
     print(f"{prefix}{msg}", flush=True)
 
 
@@ -94,6 +95,7 @@ def _emit(event_type: str, **kwargs):
     """输出结构化事件，site_manager SSE 端可解析，同时写入日志文件。"""
     payload = json.dumps({"event": event_type, **kwargs}, ensure_ascii=False)
     _logger.info("[EVENT] %s %s", event_type, json.dumps(kwargs, ensure_ascii=False)[:200])
+    # stdout 保留输出给 SSE 管道
     print(f"[EVENT] {payload}", flush=True)
 
 
@@ -713,9 +715,9 @@ def main():
     args = ap.parse_args()
 
     site_config = load_site_config(args.site)
-    print(f"[*] Site: {site_config.name} ({site_config.base_url})")
-    print(f"[*] Groups: {[g.name for g in site_config.groups]}")
-    print(f"[*] Deep: {args.deep}, Wait: {args.wait}s, Max pages: {args.max_pages}")
+    _logger.info("CLI启动: site=%s (%s), groups=%s, deep=%s, wait=%ds, max_pages=%d",
+                 site_config.name, site_config.base_url,
+                 [g.name for g in site_config.groups], args.deep, args.wait, args.max_pages)
 
     output = crawl_site_by_groups(
         site_config,
@@ -731,7 +733,7 @@ def main():
     )
 
     if output:
-        print(f"\n结果: {output}")
+        _logger.info("爬取完成: output=%s", output)
 
 
 if __name__ == "__main__":
