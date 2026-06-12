@@ -1,0 +1,5 @@
+[2026-06-12 09:20:14] [INFO] [logger] 日志会话开始: session=20260612_092014, dir=C:\Users\languangheng\.qclaw\workspace-tfxjjhfnjialcuju\site-crawler\log\20260612_092014
+[2026-06-12 09:20:14] [INFO] [logger]   all.log  → C:\Users\languangheng\.qclaw\workspace-tfxjjhfnjialcuju\site-crawler\log\20260612_092014\all.log
+[2026-06-12 09:20:14] [INFO] [logger]   err.log  → C:\Users\languangheng\.qclaw\workspace-tfxjjhfnjialcuju\site-crawler\log\20260612_092014\err.log
+[2026-06-12 09:20:14] [INFO] [second_run] 第二次运行日志
+[2026-06-12 09:20:14] [ERROR] [second_run] 第二次运行错误
