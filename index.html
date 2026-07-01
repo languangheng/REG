@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RELATION EMERGENT GRAVITY | 关系涌现引力论</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3e 50%, #0d1b2a 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      overflow: hidden;
+    }
+    .stars {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none; z-index: 0;
+    }
+    .star {
+      position: absolute; background: #fff; border-radius: 50%;
+      animation: twinkle 3s infinite;
+    }
+    @keyframes twinkle {
+      0%, 100% { opacity: 0.3; }
+      50% { opacity: 1; }
+    }
+    .container {
+      text-align: center;
+      z-index: 1;
+      max-width: 700px;
+      padding: 40px;
+      position: relative;
+    }
+    .badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 50px;
+      padding: 6px 16px;
+      font-size: 13px;
+      color: #a8d8ff;
+      margin-bottom: 24px;
+    }
+    .badge-dot {
+      width: 8px; height: 8px;
+      background: #4ade80;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(74,222,128,0.5); }
+      50% { box-shadow: 0 0 0 6px rgba(74,222,128,0); }
+    }
+    h1 {
+      font-size: 42px;
+      font-weight: 800;
+      background: linear-gradient(135deg, #60a5fa, #a78bfa, #f472b6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      line-height: 1.3;
+      margin-bottom: 12px;
+      letter-spacing: -1px;
+    }
+    h2 {
+      font-size: 18px;
+      font-weight: 400;
+      color: rgba(255,255,255,0.6);
+      margin-bottom: 32px;
+      letter-spacing: 2px;
+    }
+    .lang-select {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      margin-bottom: 40px;
+      flex-wrap: wrap;
+    }
+    .lang-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 20px 32px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.3s ease;
+      color: #fff;
+      min-width: 140px;
+    }
+    .lang-btn:hover {
+      background: rgba(255,255,255,0.12);
+      border-color: rgba(96,165,250,0.5);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 32px rgba(96,165,250,0.15);
+    }
+    .lang-flag { font-size: 28px; }
+    .lang-name { font-size: 14px; font-weight: 600; }
+    .lang-sub { font-size: 11px; color: rgba(255,255,255,0.5); }
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 12px 0;
+      color: rgba(255,255,255,0.2);
+      font-size: 12px;
+    }
+    .divider::before, .divider::after {
+      content: ''; flex: 1; height: 1px;
+      background: rgba(255,255,255,0.1);
+    }
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-bottom: 32px;
+    }
+    .info-card {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      padding: 14px;
+      text-align: left;
+    }
+    .info-label { font-size: 10px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+    .info-value { font-size: 14px; font-weight: 600; color: #a8d8ff; }
+    .cert-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,215,0,0.3);
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 12px;
+      color: #ffd700;
+      margin-bottom: 24px;
+    }
+    .prohibited {
+      background: rgba(239,68,68,0.08);
+      border: 1px solid rgba(239,68,68,0.2);
+      border-radius: 12px;
+      padding: 16px 20px;
+      font-size: 13px;
+      color: rgba(255,255,255,0.8);
+      line-height: 1.7;
+      text-align: left;
+      margin-bottom: 24px;
+    }
+    .prohibited strong { color: #fca5a5; }
+    footer {
+      font-size: 11px;
+      color: rgba(255,255,255,0.3);
+      margin-top: 20px;
+    }
+    footer a { color: rgba(96,165,250,0.7); text-decoration: none; }
+    @media (max-width: 500px) {
+      h1 { font-size: 28px; }
+      .container { padding: 24px 16px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Stars background -->
+  <div class="stars" id="stars"></div>
+
+  <div class="container">
+    <!-- Status badge -->
+    <div class="badge">
+      <div class="badge-dot"></div>
+      <span>Open Access &nbsp;|&nbsp; 开放获取</span>
+    </div>
+
+    <h1>Relational Emergent Gravity</h1>
+    <h2>RELATION EMERGENT GRAVITY &nbsp;/&nbsp; 关系涌现引力论</h2>
+
+    <!-- Certification badge -->
+    <div class="cert-badge">
+      &#10004; Authenticated by <strong>tsa.cn</strong> &nbsp;|&nbsp; 已通过 tsa.cn 时间戳认证
+    </div>
+
+    <!-- Language selection -->
+    <div class="lang-select">
+      <a class="lang-btn" href="paper/zh/README.html">
+        <span class="lang-flag">&#127475;&#127468;</span>
+        <span class="lang-name">English</span>
+        <span class="lang-sub">英文版论文</span>
+      </a>
+      <a class="lang-btn" href="paper/zh/README_zh.html">
+        <span class="lang-flag">&#127475;&#127481;</span>
+        <span class="lang-name">中文</span>
+        <span class="lang-sub">中文版论文</span>
+      </a>
+    </div>
+
+    <div class="divider">OR &nbsp;|&nbsp; 或者</div>
+
+    <div class="lang-select">
+      <a class="lang-btn" href="https://github.com/">
+        <span class="lang-flag">&#128187;</span>
+        <span class="lang-name">View on GitHub</span>
+        <span class="lang-sub">GitHub 仓库</span>
+      </a>
+    </div>
+
+    <!-- Paper info -->
+    <div class="info-grid">
+      <div class="info-card">
+        <div class="info-label">Author &nbsp;|&nbsp; 作者</div>
+        <div class="info-value">Lan Guangheng</div>
+      </div>
+      <div class="info-card">
+        <div class="info-label">Date &nbsp;|&nbsp; 日期</div>
+        <div class="info-value">July 2026</div>
+      </div>
+      <div class="info-card">
+        <div class="info-label">Field &nbsp;|&nbsp; 领域</div>
+        <div class="info-value">Theoretical Physics</div>
+      </div>
+      <div class="info-card">
+        <div class="info-label">Citations &nbsp;|&nbsp; 引用</div>
+        <div class="info-value">0 (Preprint)</div>
+      </div>
+    </div>
+
+    <!-- Copyright notice -->
+    <div class="prohibited">
+      <strong>&#9888; 版权声明 &nbsp;/&nbsp; Copyright Notice</strong><br><br>
+      &#9888; 本论文受中华人民共和国著作权法保护。<strong>未经作者明确书面授权，任何单位及个人不得以任何方式（包含但不限于：复制、转载、摘编、镜像、传播、出版、商业使用）使用本论文的全部或部分内容。</strong><br><br>
+      &#9888; 本论文已通过 <strong>tsa.cn</strong>（国家授时中心时间戳认证平台）完成时间戳认证，可作为创作时间及内容完整性的法律证据。<br><br>
+      &#9888; <strong>This paper is protected under the People's Republic of China Copyright Law. Without the author's explicit written permission, no organization or individual may reproduce, republish, excerpt, mirror, transmit, publish, or commercially exploit any part of this paper in any form.</strong><br><br>
+      &#9888; This paper has been timestamp-certified through <strong>tsa.cn</strong> (National Time Service Center Timestamp Certification Platform), providing legal evidence of creation time and content integrity.
+    </div>
+
+    <footer>
+      <a href="https://github.com/languangheng/REG-Paper">View Source Code</a> &nbsp;|&nbsp;
+      <a href="https://www.tsa.cn/">tsa.cn</a>
+    </footer>
+  </div>
+
+  <script>
+    // Auto-detect browser language and redirect
+    (function() {
+      var lang = navigator.language || navigator.userLanguage || '';
+      var isZh = lang.toLowerCase().startsWith('zh');
+      // Always show Chinese version:
+      window.location.replace('paper/zh/README_zh.html');
+    })();
+
+    // Generate starfield
+    (function() {
+      var stars = document.getElementById('stars');
+      for (var i = 0; i < 120; i++) {
+        var star = document.createElement('div');
+        star.className = 'star';
+        var size = Math.random() * 2 + 1;
+        star.style.cssText = [
+          'width:' + size + 'px', 'height:' + size + 'px',
+          'left:' + (Math.random()*100) + '%',
+          'top:' + (Math.random()*100) + '%',
+          'animation-delay:' + (Math.random()*3) + 's',
+          'animation-duration:' + (Math.random()*2+2) + 's'
+        ].join(';');
+        stars.appendChild(star);
+      }
+    })();
+  </script>
+</body>
+</html>

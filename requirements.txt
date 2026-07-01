@@ -1,0 +1,10 @@
+# Requirements for REG Paper Analysis
+# Install: pip install -r requirements.txt
+
+numpy>=1.20
+scipy>=1.7
+matplotlib>=3.5
+emcee>=3.0
+corner>=2.2
+tqdm>=4.60
+astropy>=5.0
