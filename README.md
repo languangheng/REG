@@ -70,35 +70,8 @@ REG-Paper/
 |:------:|:--------------:|:---:|
 | **ESE** (Emergent Structural Emerulation) | [https://zenodo.org/records/21137141](https://zenodo.org/records/21137141) | [10.5281/zenodo.21137140](https://zenodo.org/records/21137141) |
 | **REG** (Relational Emergent Gravity) | [zenodo.org/records/21071504](https://zenodo.org/records/21071504) | [10.5281/zenodo.21071504](https://doi.org/10.5281/zenodo.21071504) |
-
 ---
-
-## &#128218; Papers | 论文
-
-| Version | Format | File |
-|:--------|:-------|:-----|
-| English | PDF | [`paper/REG_Paper_EN.pdf`](paper/REG_Paper_EN.pdf) |
-### 🎬 Theory Origin Story | 理论起源故事
-
-**如何从哥德巴赫猜想推导出万物理论？**
-
-这是一个完整的故事，讲述了一个数学猜想（哥德巴赫猜想）如何启发了一个新的宇宙理论：
-
-- 📖 **[从1+1到宇宙：一个数学猜想如何让我推导出万物理论](video/理论起源完整版.md)** (Markdown, 中文)
-
-**内容大纲：**
-1. 一个困扰了数学家280年的问题（哥德巴赫猜想）
-2. 乘法和加法，两套完全不兼容的规则
-3. 这个鸿沟不只是数学问题（E=mc²的启示）
-4. 加法和乘法长出了空间和时间（为什么是3+1维）
-5. 如果宇宙底层就是加法和乘法呢？（关系基元）
-6. 代码跑出来的结果让我震惊（三代费米子涌现）
-7. 从微观网络到宇宙学（导出引力场方程）
-8. 用真实数据检验（MCMC拟合超新星）
-9. 最冒险的预言——引力波回声（LIGO搜索）
-10. 这个理论能解释什么？不能解释什么？
-
----
+ 
 
 ## &#128274; Copyright Notice | 版权声明
 
