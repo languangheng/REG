@@ -77,8 +77,7 @@ body { font-family: -apple-system, system-ui, sans-serif; background: #0f1117; c
 
 <div class="header">
   <h1>🕷️ 站点爬虫管理</h1>
-  <button class="add-btn" onclick="showAutoAnalyze()">🔍 自动分析</button>
-  <button class="add-btn" style="background:#059669;margin-left:8px" onclick="openHarWizard()">🎬 HAR 录制</button>
+  <button class="add-btn" onclick="openGuidedWizard()">➕ 添加网站</button>
 </div>
 
 <div class="grid" id="siteGrid"></div>
@@ -219,7 +218,7 @@ function renderSites() {
       <div class="base-url">${esc(s.base_url)}</div>
       ${groupsHtml || '<div style="color:#6b7280;font-size:12px">暂无分组</div>'}
       <div style="margin-bottom:8px">
-        <button class="add-entry-btn" onclick="openHarWizard('${esc(s.key)}')" style="background:#059669;color:#e0e7ff">＋ 添加分组</button>
+        <button class="add-entry-btn" onclick="openGuidedWizard('${esc(s.key)}')" style="background:#059669;color:#e0e7ff">＋ 添加分组</button>
       </div>
       <div class="actions">
         <button class="btn primary" onclick="testCrawl('${esc(s.key)}')">完整爬取</button>
@@ -523,9 +522,9 @@ async function deleteEntry(siteKey, groupName, entryIndex) {
   }
 }
 
-function openHarWizard(siteKey) {
-  const url = siteKey ? '/wizard_har?site_key=' + encodeURIComponent(siteKey) + '&mode=add_group' : '/wizard_har';
-  window.open(url, 'har_wizard', 'width=900,height=700');
+function openGuidedWizard(siteKey) {
+  const url = '/wizard_guided';
+  window.open(url, 'guided_wizard', 'width=900,height=700');
 }
 
 function getWorkers(key) {
@@ -725,7 +724,7 @@ async function saveAnalyzeResult() {
   }
 }
 
-// ── HAR 向导 postMessage 监听 ─────────────────────────
+// ── 向导 postMessage 监听 ─────────────────────────
 window.addEventListener('message', (e) => {
   if (e.data?.source === 'har-wizard' && e.data?.action === 'config_saved') {
     const beforeCount = sites.length;

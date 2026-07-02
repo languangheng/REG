@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- 标题输入框 -->
+    <EditText
+        android:id="@+id/et_title"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:hint="笔记标题"
+        android:inputType="text"
+        android:maxLines="1"
+        android:padding="16dp"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:background="@android:drawable/editbox_background"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_margin="16dp" />
+
+    <!-- 文本内容输入框 -->
+    <EditText
+        android:id="@+id/et_content"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:hint="输入文本内容（可被搜索）..."
+        android:inputType="textMultiLine"
+        android:minLines="2"
+        android:maxLines="3"
+        android:padding="16dp"
+        android:gravity="top|start"
+        android:background="@android:drawable/editbox_background"
+        app:layout_constraintTop_toBottomOf="@id/et_title"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp" />
+
+    <!-- 手写笔迹画板标签 -->
+    <TextView
+        android:id="@+id/tv_ink_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="✏️ 手写笔迹"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:layout_marginTop="12dp"
+        app:layout_constraintTop_toBottomOf="@id/et_content"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginStart="16dp" />
+
+    <!-- 手写画板 -->
+    <com.example.myapplication.ui.InkCanvasView
+        android:id="@+id/ink_canvas"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="#FAFAFA"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginTop="4dp"
+        app:layout_constraintTop_toBottomOf="@id/tv_ink_label"
+        app:layout_constraintBottom_toTopOf="@id/btn_clear_ink"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHeight_default="percent"
+        app:layout_constraintHeight_percent="0.25" />
+
+    <!-- 清除笔迹按钮 -->
+    <Button
+        android:id="@+id/btn_clear_ink"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="清除笔迹"
+        android:textSize="12sp"
+        app:layout_constraintBottom_toTopOf="@id/tv_pdf_label"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginStart="16dp"
+        android:layout_marginBottom="8dp" />
+
+    <!-- 插入PDF按钮 -->
+    <Button
+        android:id="@+id/btn_insert_pdf"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="插入 PDF"
+        android:textSize="12sp"
+        app:layout_constraintBottom_toTopOf="@id/tv_pdf_label"
+        app:layout_constraintStart_toEndOf="@id/btn_clear_ink"
+        android:layout_marginStart="8dp"
+        android:layout_marginBottom="8dp" />
+
+    <!-- PDF 标签 -->
+    <TextView
+        android:id="@+id/tv_pdf_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="📄 PDF 附件"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        app:layout_constraintBottom_toTopOf="@id/tv_pdf_name"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginStart="16dp"
+        android:layout_marginBottom="4dp" />
+
+    <!-- PDF 文件名显示 -->
+    <TextView
+        android:id="@+id/tv_pdf_name"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="未选择 PDF"
+        android:textSize="13sp"
+        android:textColor="#888888"
+        android:padding="4dp"
+        app:layout_constraintBottom_toTopOf="@id/tv_pdf_loading"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp" />
+
+    <!-- PDF 加载状态 -->
+    <TextView
+        android:id="@+id/tv_pdf_loading"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textSize="12sp"
+        android:textColor="#888888"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@id/iv_pdf_preview"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginStart="16dp"
+        android:layout_marginBottom="4dp" />
+
+    <!-- PDF 预览 ImageView -->
+    <ImageView
+        android:id="@+id/iv_pdf_preview"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:scaleType="fitCenter"
+        android:background="#F5F5F5"
+        android:visibility="gone"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="8dp"
+        app:layout_constraintBottom_toTopOf="@id/btn_save"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/btn_clear_ink"
+        app:layout_constraintHeight_default="percent"
+        app:layout_constraintHeight_percent="0.25" />
+
+    <!-- 保存按钮 -->
+    <Button
+        android:id="@+id/btn_save"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="保存笔记"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_margin="16dp" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

@@ -5,78 +5,87 @@
       "base_url": "https://www.mimimi.top",
       "groups": [
         {
-          "name": "图片",
-          "resource_type": "art",
+          "name": "www.mimimi.top",
+          "resource_type": "video",
           "entry_points": [
             {
-              "name": "Just a moment...",
-              "url": "https://www.mimimi.top/arttype/8.html",
-              "type": "art"
+              "name": "www.mimimi.top",
+              "url": "https://www.mimimi.top/vodshow/12-----------.html",
+              "type": "video"
             }
           ],
           "link_patterns": {
-            "art_detail": [
-              "/artdetail-\\d+\\.html"
+            "video_detail": [
+              "/voddetail/\\d+\\.html"
             ],
-            "exclude": [
-              "/arttype/\\d+\\.html"
+            "play_page": [
+              "/vodplay/\\d+-\\d+-\\d+\\.html"
             ]
           },
-          "extract_chains": {
-            "art": {
-              "steps": [
-                {
-                  "name": "enter_detail",
-                  "method": "navigate"
-                },
-                {
-                  "name": "capture_images",
-                  "method": "network_capture",
-                  "filter": ".jpg,.jpeg,.png,.webp,.gif",
-                  "wait_seconds": 3
-                }
-              ]
-            }
-          },
           "crawl_pattern": {
+            "chain_order": [
+              "list_crawl",
+              "level_1",
+              "stream_capture"
+            ],
             "list_crawl": {
+              "name": "list_crawl",
               "steps": [
                 {
-                  "action": "navigate",
-                  "url_template": ""
+                  "action": "navigate"
                 },
                 {
                   "action": "smart_wait",
-                  "selector": "a[href], .item, article, main"
+                  "selector": "a[href*='/vodshow/']"
                 },
                 {
                   "action": "extract_links",
                   "source": "markdown",
-                  "link_type": "art_detail"
+                  "link_type": "level_1"
                 }
               ],
               "pagination": {
                 "methods": [
-                  "button_click",
                   "url_construct"
                 ],
+                "url_construct": {
+                  "format": "maccms",
+                  "url_template": "/vodshow/12--------{page}---.html"
+                },
                 "max_pages": 100
               }
             },
             "level_1": {
+              "name": "level_1",
               "steps": [
                 {
-                  "action": "navigate",
-                  "url_template": "/artdetail-{id}.html"
+                  "action": "navigate"
                 },
                 {
                   "action": "smart_wait",
-                  "selector": "img[src], .art-content, .content, .pic"
+                  "selector": "a[href*='/voddetail/']"
+                },
+                {
+                  "action": "extract_links",
+                  "source": "markdown",
+                  "link_type": "resource"
+                }
+              ]
+            },
+            "stream_capture": {
+              "name": "stream_capture",
+              "steps": [
+                {
+                  "action": "navigate"
+                },
+                {
+                  "action": "smart_wait",
+                  "selector": "video, iframe[src], .player, #player, .video-box"
                 },
                 {
                   "action": "network_capture",
-                  "filter": ".jpg,.jpeg,.png,.webp,.gif",
-                  "wait_seconds": 3
+                  "filter": ".m3u8,.mp4,.flv,.ts",
+                  "wait_seconds": 5
                 }
               ]
             }

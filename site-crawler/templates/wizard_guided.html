@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>添加网站 - 引导向导</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,system-ui,sans-serif;background:#1a1d27;color:#e5e7eb;font-size:13px;display:flex;flex-direction:column;height:100vh}
+
+.top-bar{background:#252836;padding:12px 16px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #2d3148}
+.top-bar h2{font-size:15px;font-weight:600;color:#f9fafb;flex:1}
+.status-badge{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600}
+.status-idle{background:#374151;color:#9ca3af}
+.status-active{background:#065f46;color:#6ee7b7;animation:pulse 1.5s infinite}
+.status-error{background:#7f1d1d;color:#fca5a5}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+
+.btn{padding:7px 14px;border-radius:5px;border:none;cursor:pointer;font-size:12px;font-weight:500;transition:all .15s}
+.btn-primary{background:#6366f1;color:#fff}
+.btn-primary:hover{background:#818cf8}
+.btn-success{background:#059669;color:#fff}
+.btn-success:hover{background:#10b981}
+.btn-danger{background:#dc2626;color:#fff}
+.btn-danger:hover{background:#ef4444}
+.btn-warning{background:#d97706;color:#fff}
+.btn-warning:hover{background:#f59e0b}
+.btn-ghost{background:transparent;border:1px solid #374151;color:#d1d5db}
+.btn-ghost:hover{background:#1f2937}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+
+.main{display:flex;flex:1;overflow:hidden}
+
+/* 左面板: 引导步骤 + 日志 */
+.guide-panel{width:38%;border-right:1px solid #2d3148;display:flex;flex-direction:column}
+.panel-header{padding:10px 14px;background:#1f2937;border-bottom:1px solid #2d3148;font-size:12px;color:#9ca3af;display:flex;align-items:center;justify-content:space-between}
+.panel-header .label{font-weight:600;color:#e5e7eb}
+
+/* 启动区 */
+.start-section{padding:16px;border-bottom:1px solid #2d3148}
+.start-section label{display:block;font-size:12px;color:#9ca3af;margin-bottom:6px}
+.start-section input{width:100%;padding:8px 10px;background:#111827;border:1px solid #374151;border-radius:5px;color:#e5e7eb;font-size:12px;margin-bottom:10px}
+.start-section input:focus{outline:none;border-color:#6366f1}
+.start-section input::placeholder{color:#6b7280}
+
+/* 操作区 */
+.actions-section{padding:14px;border-bottom:1px solid #2d3148}
+.action-group{margin-bottom:12px}
+.action-group-title{font-size:11px;color:#9ca3af;margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.action-row{display:flex;gap:8px;flex-wrap:wrap}
+.action-row .btn{flex:1;min-width:0;white-space:nowrap}
+.action-hint{font-size:11px;color:#6b7280;margin-top:6px;line-height:1.5}
+
+/* 路径列表 */
+.levels-section{flex:1;overflow-y:auto;border-bottom:1px solid #2d3148}
+.level-item{display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-bottom:1px solid #1f2937}
+.level-item:hover{background:#1f2937}
+.level-num{min-width:26px;height:26px;border-radius:50%;background:#2d3148;display:flex;align-items:center;justify-content:center;font-size:12px;color:#9ca3af;flex-shrink:0;font-weight:600}
+.level-num.has-resource{background:#065f46;color:#6ee7b7}
+.level-info{flex:1;min-width:0}
+.level-name{font-size:12px;font-weight:600;color:#e5e7eb;margin-bottom:2px}
+.level-pattern{font-size:11px;color:#60a5fa;word-break:break-all;font-family:monospace}
+.level-resources{margin-top:4px}
+.level-resource-tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:500;margin-right:4px}
+.tag-m3u8{background:#065f46;color:#6ee7b7}
+.tag-mp4{background:#713f12;color:#fcd34d}
+.tag-flv{background:#7c2d12;color:#fdba74}
+.tag-ts{background:#1e3a5f;color:#93c5fd}
+.level-connector{width:1px;height:8px;background:#2d3148;margin-left:27px}
+
+/* 翻页信息 */
+.pagination-info{padding:10px 14px;background:#1e1b4b;border-bottom:1px solid #312e81}
+.pagination-info .title{font-size:11px;color:#a5b4fc;font-weight:600;margin-bottom:4px}
+.pagination-info .detail{font-size:11px;color:#818cf8;font-family:monospace;word-break:break-all}
+
+/* 日志区 */
+.log-section{height:180px;overflow-y:auto;background:#111827;border-top:1px solid #2d3148}
+.log-header{padding:6px 14px;font-size:11px;color:#6b7280;font-weight:600;border-bottom:1px solid #1f2937;position:sticky;top:0;background:#111827;z-index:1}
+.log-entry{padding:3px 14px;font-size:11px;line-height:1.6;border-bottom:1px solid #1a1d27}
+.log-entry.info{color:#9ca3af}
+.log-entry.ok{color:#6ee7b7}
+.log-entry.err{color:#fca5a5}
+.log-entry.warn{color:#fcd34d}
+.log-entry.event{color:#c7d2fe}
+.log-time{color:#4b5563;margin-right:6px}
+
+/* 右面板: 配置预览 */
+.config-panel{width:62%;display:flex;flex-direction:column}
+.config-header{padding:10px 14px;background:#1f2937;border-bottom:1px solid #2d3148;display:flex;align-items:center;justify-content:space-between}
+.config-content{flex:1;overflow-y:auto;padding:14px}
+.config-json{font-family:'Cascadia Code',Consolas,monospace;font-size:11px;line-height:1.6;color:#a5b4fc;white-space:pre-wrap;word-break:break-all}
+
+/* 编辑弹窗 */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;align-items:center;justify-content:center}
+.modal-overlay.active{display:flex}
+.modal-box{background:#252836;border-radius:8px;padding:20px;width:500px;max-width:90vw;border:1px solid #2d3148}
+.modal-box h3{font-size:14px;color:#f9fafb;margin-bottom:12px}
+.modal-box textarea{width:100%;height:80px;background:#111827;border:1px solid #374151;border-radius:5px;color:#e5e7eb;font-family:monospace;font-size:12px;padding:8px;resize:vertical}
+.modal-box textarea:focus{outline:none;border-color:#6366f1}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+
+/* 滚动条 */
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#374151;border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:#4b5563}
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+  <h2>➕ 添加网站</h2>
+  <span id="statusBadge" class="status-badge status-idle">未开始</span>
+  <button class="btn btn-ghost" onclick="window.close()">关闭</button>
+</div>
+
+<div class="main">
+  <!-- 左面板: 引导步骤 -->
+  <div class="guide-panel">
+    <!-- 启动区 -->
+    <div id="startSection" class="start-section">
+      <label>网站 URL（列表页）</label>
+      <input id="startUrl" type="text" placeholder="https://example.com/vodshow/1-----------.html">
+      <label>网站名称（可选）</label>
+      <input id="siteName" type="text" placeholder="自动从URL提取">
+      <button class="btn btn-primary" style="width:100%" onclick="doStart()">🚀 开始引导</button>
+    </div>
+
+    <!-- 操作区（引导中可见） -->
+    <div id="actionsSection" class="actions-section" style="display:none">
+      <div class="action-group">
+        <div class="action-group-title">📄 翻页检测</div>
+        <div class="action-row">
+          <button id="btnPagStart" class="btn btn-primary" onclick="doPaginationStart()">▶ 开始检测</button>
+          <button id="btnPagEnd" class="btn btn-success" onclick="doPaginationEnd()" disabled>⏹ 结束检测</button>
+        </div>
+        <div id="pagHint" class="action-hint">点击"开始检测"后，在浏览器中翻页，然后点击"结束检测"识别翻页模式</div>
+      </div>
+
+      <div class="action-group">
+        <div class="action-group-title">🔗 路径管理</div>
+        <div class="action-row">
+          <button id="btnAddPath" class="btn btn-warning" onclick="doAddPath()">➕ 添加路径</button>
+          <button id="btnDetectRes" class="btn btn-success" onclick="doDetectResource()">🔍 检测资源</button>
+        </div>
+        <div id="pathHint" class="action-hint">进入下一级页面后点击"添加路径"；在资源页点击"检测资源"</div>
+      </div>
+
+      <div class="action-group">
+        <div class="action-group-title">✅ 完成</div>
+        <div class="action-row">
+          <button id="btnComplete" class="btn btn-success" onclick="doComplete()" disabled>💾 保存配置</button>
+          <button id="btnCancel" class="btn btn-danger" onclick="doCancel()">✖ 取消</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 翻页信息 -->
+    <div id="paginationInfo" class="pagination-info" style="display:none">
+      <div class="title">🔄 翻页模式已识别</div>
+      <div id="paginationDetail" class="detail"></div>
+    </div>
+
+    <!-- 层级列表 -->
+    <div id="levelsSection" class="levels-section">
+      <!-- 动态填充 -->
+    </div>
+
+    <!-- 日志区 -->
+    <div class="log-section">
+      <div class="log-header">📋 操作日志</div>
+      <div id="logContent"></div>
+    </div>
+  </div>
+
+  <!-- 右面板: 配置预览 -->
+  <div class="config-panel">
+    <div class="config-header">
+      <span class="label">⚙️ 配置预览</span>
+      <span id="configStatus" style="font-size:11px;color:#6b7280">等待引导完成...</span>
+    </div>
+    <div class="config-content">
+      <pre id="configJson" class="config-json">引导完成后将在此显示生成的配置...</pre>
+    </div>
+  </div>
+</div>
+
+<!-- 编辑模式弹窗 -->
+<div id="editModal" class="modal-overlay">
+  <div class="modal-box">
+    <h3>编辑路径模式</h3>
+    <textarea id="editPattern"></textarea>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeEditModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveEditPattern()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── 全局状态 ──────────────────────────────────────────
+let sessionId = null;
+let sessionData = null;
+let editingLevel = null;
+
+// ── API 调用封装 ──────────────────────────────────────
+async function apiCall(path, method='POST', body=null) {
+  const opts = {
+    method,
+    headers: {'Content-Type': 'application/json'},
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const resp = await fetch(path, opts);
+  return resp.json();
+}
+
+// ── 日志 ──────────────────────────────────────────────
+function addLog(msg, type='info') {
+  const el = document.getElementById('logContent');
+  const now = new Date().toLocaleTimeString('zh-CN', {hour12:false});
+  const entry = document.createElement('div');
+  entry.className = `log-entry ${type}`;
+  entry.innerHTML = `<span class="log-time">${now}</span>${escHtml(msg)}`;
+  el.appendChild(entry);
+  el.scrollTop = el.scrollHeight;
+}
+
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// ── 状态更新 ──────────────────────────────────────────
+function updateUI(data) {
+  sessionData = data;
+
+  // 状态徽章
+  const badge = document.getElementById('statusBadge');
+  if (data.pagination_detecting) {
+    badge.className = 'status-badge status-active';
+    badge.textContent = '翻页检测中...';
+  } else if (data.resource_detected) {
+    badge.className = 'status-badge status-active';
+    badge.textContent = '资源已检测';
+  } else if (sessionId) {
+    badge.className = 'status-badge status-active';
+    badge.textContent = '引导中';
+  } else {
+    badge.className = 'status-badge status-idle';
+    badge.textContent = '未开始';
+  }
+
+  // 翻页信息
+  const pagInfo = document.getElementById('paginationInfo');
+  if (data.pagination) {
+    pagInfo.style.display = '';
+    document.getElementById('paginationDetail').textContent =
+      `模式: ${data.pagination.format} | 方法: ${data.pagination.method} | 模板: ${data.pagination.generalized}`;
+  } else {
+    pagInfo.style.display = 'none';
+  }
+
+  // 翻页按钮状态
+  const pagDetecting = data.pagination_detecting;
+  document.getElementById('btnPagStart').disabled = pagDetecting;
+  document.getElementById('btnPagEnd').disabled = !pagDetecting;
+  document.getElementById('pagHint').textContent = pagDetecting
+    ? '⚠️ 翻页检测中... 请在浏览器中翻页，然后点击"结束检测"'
+    : '点击"开始检测"后，在浏览器中翻页，然后点击"结束检测"识别翻页模式';
+
+  // 层级列表
+  renderLevels(data.levels || []);
+
+  // 完成按钮
+  const hasResource = (data.levels || []).some(l => l.is_resource);
+  const hasPaths = (data.levels || []).length >= 2;
+  document.getElementById('btnComplete').disabled = !(hasPaths && hasResource);
+
+  // 配置预览
+  updateConfigPreview(data);
+}
+
+function renderLevels(levels) {
+  const el = document.getElementById('levelsSection');
+  if (!levels.length) {
+    el.innerHTML = '<div style="padding:20px;text-align:center;color:#6b7280;font-size:12px">开始引导后将显示页面层级</div>';
+    return;
+  }
+  let html = '';
+  levels.forEach((lv, i) => {
+    if (i > 0) html += '<div class="level-connector"></div>';
+    const numClass = lv.is_resource ? 'level-num has-resource' : 'level-num';
+    const resHtml = lv.resources.length
+      ? '<div class="level-resources">' + lv.resources.map(r =>
+          `<span class="level-resource-tag tag-${r.type}">${r.type}</span>`
+        ).join('') + '</div>'
+      : '';
+    const resourceLabel = lv.is_resource ? ' ✅资源页' : '';
+    html += `
+      <div class="level-item">
+        <div class="${numClass}">${lv.level}</div>
+        <div class="level-info">
+          <div class="level-name">${escHtml(lv.name)}${resourceLabel}</div>
+          <div class="level-pattern" title="双击编辑" ondblclick="openEditModal(${lv.level})">${escHtml(lv.path_pattern)}</div>
+          ${resHtml}
+        </div>
+      </div>`;
+  });
+  el.innerHTML = html;
+}
+
+function updateConfigPreview(data) {
+  const levels = data.levels || [];
+  const pag = data.pagination;
+
+  if (levels.length < 2) {
+    document.getElementById('configJson').textContent = '添加至少 2 个层级后将显示配置预览...';
+    document.getElementById('configStatus').textContent = '等待更多层级...';
+    return;
+  }
+
+  // 前端模拟配置生成
+  const config = buildConfig(data);
+  document.getElementById('configJson').textContent = JSON.stringify(config, null, 2);
+  document.getElementById('configStatus').textContent = `${levels.length} 个层级 | ${levels.filter(l=>l.is_resource).length} 个资源页`;
+}
+
+function buildConfig(data) {
+  const levels = data.levels || [];
+  const pag = data.pagination;
+  const chains = {};
+  const chainOrder = [];
+  const linkPatterns = {};
+
+  for (let i = 0; i < levels.length; i++) {
+    const lv = levels[i];
+    if (i === 0) {
+      const chainName = 'list_crawl';
+      const nextIsRes = levels.length > 1 && levels[1].is_resource;
+      const lt = nextIsRes ? 'resource' : 'level_1';
+      chains[chainName] = {
+        name: chainName,
+        steps: [
+          {action: 'navigate'},
+          {action: 'smart_wait', selector: 'body'},
+          {action: 'extract_links', source: 'markdown', link_type: lt},
+        ],
+        ...(pag ? {pagination: {
+          methods: [pag.method],
+          url_construct: {format: pag.format, url_template: pag.generalized},
+          max_pages: 100,
+        }} : {}),
+      };
+      chainOrder.push(chainName);
+    } else if (lv.is_resource) {
+      const chainName = 'stream_capture';
+      chains[chainName] = {
+        name: chainName,
+        steps: [
+          {action: 'navigate'},
+          {action: 'smart_wait', selector: 'video, iframe[src], .player'},
+          {action: 'network_capture', filter: '.m3u8,.mp4,.flv,.ts', wait_seconds: 5},
+        ],
+      };
+      chainOrder.push(chainName);
+    } else {
+      const chainName = `level_${i}`;
+      const next = levels[i + 1];
+      const nextIsRes = next && next.is_resource;
+      const lt = nextIsRes ? 'resource' : `level_${i + 1}`;
+      chains[chainName] = {
+        name: chainName,
+        steps: [
+          {action: 'navigate'},
+          {action: 'smart_wait', selector: 'body'},
+          {action: 'extract_links', source: 'markdown', link_type: lt},
+        ],
+      };
+      chainOrder.push(chainName);
+    }
+
+    // link_patterns
+    if (!lv.is_resource && i + 1 < levels.length) {
+      const next = levels[i + 1];
+      const lt = guessLinkType(next.path_pattern);
+      if (!linkPatterns[lt]) linkPatterns[lt] = [];
+      linkPatterns[lt].push(next.path_pattern);
+    }
+  }
+
+  return {
+    name: data.site_name || '',
+    base_url: data.start_url ? new URL(data.start_url).origin : '',
+    crawl_pattern: {chain_order: chainOrder, ...chains},
+    link_patterns: linkPatterns,
+  };
+}
+
+function guessLinkType(pattern) {
+  const map = {detail:'video_detail',voddetail:'video_detail',play:'play_page',vodplay:'play_page'};
+  const lower = pattern.toLowerCase();
+  for (const [k,v] of Object.entries(map)) {
+    if (lower.includes(k)) return v;
+  }
+  // fallback: first non-digit segment
+  const parts = pattern.replace(/\\d\+/g,'').replace(/\\\./g,'').replace(/\./g,'').split('/');
+  for (const p of parts) {
+    const c = p.replace(/[^a-zA-Z]/g,'');
+    if (c && c.length > 1) return c + '_page';
+  }
+  return 'next_page';
+}
+
+// ── 操作函数 ──────────────────────────────────────────
+
+async function doStart() {
+  const startUrl = document.getElementById('startUrl').value.trim();
+  const siteName = document.getElementById('siteName').value.trim();
+
+  if (!startUrl) {
+    addLog('请输入网站 URL', 'err');
+    return;
+  }
+
+  addLog(`开始引导: ${startUrl}`, 'info');
+  try {
+    const data = await apiCall('/api/guided/start', 'POST', {
+      start_url: startUrl,
+      site_name: siteName,
+    });
+
+    if (data.ok) {
+      sessionId = data.session_id;
+      addLog(`引导启动成功! 当前URL: ${data.current_url}`, 'ok');
+      document.getElementById('startSection').style.display = 'none';
+      document.getElementById('actionsSection').style.display = '';
+      updateUI(data);
+    } else {
+      addLog(`启动失败: ${data.error}`, 'err');
+    }
+  } catch (e) {
+    addLog(`网络错误: ${e.message}`, 'err');
+  }
+}
+
+async function doPaginationStart() {
+  addLog('开始翻页检测，请在浏览器中翻页...', 'warn');
+  try {
+    const data = await apiCall('/api/guided/pagination/start', 'POST');
+    if (data.ok) {
+      addLog(`已记录当前URL: ${data.url_before}`, 'info');
+      // 手动更新状态
+      if (sessionData) {
+        sessionData.pagination_detecting = true;
+        updateUI(sessionData);
+      }
+    } else {
+      addLog(`翻页检测启动失败: ${data.error}`, 'err');
+    }
+  } catch (e) {
+    addLog(`网络错误: ${e.message}`, 'err');
+  }
+}
+
+async function doPaginationEnd() {
+  addLog('结束翻页检测，正在分析URL变化...', 'info');
+  try {
+    const data = await apiCall('/api/guided/pagination/end', 'POST');
+    if (data.ok) {
+      const pag = data.pagination;
+      addLog(`✅ 翻页模式识别成功! 格式: ${pag.format}, 模板: ${pag.generalized}`, 'ok');
+      // 刷新完整状态
+      await refreshStatus();
+    } else {
+      addLog(`⚠️ ${data.error}`, 'warn');
+      if (data.url_before && data.url_after) {
+        addLog(`  URL前: ${data.url_before}`, 'info');
+        addLog(`  URL后: ${data.url_after}`, 'info');
+      }
+      // 保持翻页检测状态，允许用户继续操作
+      if (sessionData) {
+        sessionData.pagination_detecting = false;
+        updateUI(sessionData);
+      }
+    }
+  } catch (e) {
+    addLog(`网络错误: ${e.message}`, 'err');
+  }
+}
+
+async function doAddPath() {
+  addLog('添加路径，获取当前页面URL...', 'info');
+  try {
+    const data = await apiCall('/api/guided/path/add', 'POST');
+    if (data.ok) {
+      if (data.already_exists) {
+        addLog(`当前URL匹配已有 Level ${data.level} (${data.name})`, 'warn');
+      } else {
+        addLog(`✅ 添加 Level ${data.level} (${data.name})`, 'ok');
+        addLog(`  模式: ${data.path_pattern}`, 'info');
+        addLog(`  原始URL: ${data.original_url}`, 'info');
+      }
+      await refreshStatus();
+    } else {
+      addLog(`添加路径失败: ${data.error}`, 'err');
+    }
+  } catch (e) {
+    addLog(`网络错误: ${e.message}`, 'err');
+  }
+}
+
+async function doDetectResource() {
+  addLog('检测资源中，请确保视频已开始播放...', 'warn');
+  try {
+    const data = await apiCall('/api/guided/resource/detect', 'POST');
+    if (data.ok) {
+      const res = data.resources || [];
+      const types = [...new Set(res.map(r => r.type))];
+      addLog(`✅ 资源检测成功! 发现 ${res.length} 个资源 (${types.join(', ')})`, 'ok');
+      res.forEach(r => addLog(`  ${r.type}: ${r.url.substring(0, 80)}...`, 'info'));
+      await refreshStatus();
+    } else {
+      addLog(`⚠️ ${data.error}`, 'warn');
+    }
+  } catch (e) {
+    addLog(`网络错误: ${e.message}`, 'err');
+  }
+}
+
+async function doComplete() {
+  if (!confirm('确认保存配置到 sites.json？')) return;
+
+  const siteName = sessionData?.site_name || '';
+  addLog('保存配置中...', 'info');
+  try {
+    const data = await apiCall('/api/guided/complete', 'POST', {site_name: siteName});
+    if (data.ok) {
+      addLog(`✅ 配置已保存! site_key: ${data.site_key}`, 'ok');
+      addLog(`层级数: ${sessionData?.levels?.length || 0}`, 'info');
+      sessionId = null;
+
+      // 显示最终配置
+      if (data.config) {
+        document.getElementById('configJson').textContent = JSON.stringify(data.config, null, 2);
+        document.getElementById('configStatus').textContent = '✅ 已保存';
+      }
+
+      const badge = document.getElementById('statusBadge');
+      badge.className = 'status-badge status-idle';
+      badge.textContent = '已完成';
+
+      // 禁用操作按钮
+      document.querySelectorAll('#actionsSection .btn').forEach(b => b.disabled = true);
+    } else {
+      addLog(`保存失败: ${data.error}`, 'err');
+    }
+  } catch (e) {
+    addLog(`网络错误: ${e.message}`, 'err');
+  }
+}
+
+async function doCancel() {
+  if (!confirm('确认取消引导？所有进度将丢失。')) return;
+  try {
+    await apiCall('/api/guided/cancel', 'POST');
+    addLog('引导已取消', 'warn');
+    sessionId = null;
+    document.getElementById('startSection').style.display = '';
+    document.getElementById('actionsSection').style.display = 'none';
+    document.getElementById('levelsSection').innerHTML = '';
+    document.getElementById('paginationInfo').style.display = 'none';
+    document.getElementById('configJson').textContent = '引导完成后将在此显示生成的配置...';
+    document.getElementById('configStatus').textContent = '等待引导完成...';
+
+    const badge = document.getElementById('statusBadge');
+    badge.className = 'status-badge status-idle';
+    badge.textContent = '未开始';
+  } catch (e) {
+    addLog(`网络错误: ${e.message}`, 'err');
+  }
+}
+
+// ── 编辑路径模式 ──────────────────────────────────────
+
+function openEditModal(level) {
+  const lv = (sessionData?.levels || []).find(l => l.level === level);
+  if (!lv) return;
+  editingLevel = level;
+  document.getElementById('editPattern').value = lv.path_pattern;
+  document.getElementById('editModal').classList.add('active');
+}
+
+function closeEditModal() {
+  document.getElementById('editModal').classList.remove('active');
+  editingLevel = null;
+}
+
+async function saveEditPattern() {
+  const newPattern = document.getElementById('editPattern').value.trim();
+  if (!newPattern || editingLevel === null) return;
+
+  try {
+    const data = await apiCall('/api/guided/path/update', 'POST', {
+      level: editingLevel,
+      path_pattern: newPattern,
+    });
+    if (data.ok) {
+      addLog(`Level ${editingLevel} 模式已更新: ${newPattern}`, 'ok');
+      await refreshStatus();
+    } else {
+      addLog(`更新失败: ${data.error}`, 'err');
+    }
+  } catch (e) {
+    addLog(`网络错误: ${e.message}`, 'err');
+  }
+  closeEditModal();
+}
+
+// ── 刷新状态 ──────────────────────────────────────────
+
+async function refreshStatus() {
+  if (!sessionId) return;
+  try {
+    const data = await apiCall('/api/guided/status', 'GET');
+    if (data.ok) {
+      updateUI(data);
+    }
+  } catch (e) {
+    // 静默失败
+  }
+}
+
+// ── 初始化 ──────────────────────────────────────────
+addLog('引导式向导已就绪，请输入网站 URL 开始', 'info');
+</script>
+</body>
+</html>

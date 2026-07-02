@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>资源浏览 — 站点爬虫管理</title>
+<style>
+* { margin:0; padding:0; box-sizing: border-box; }
+body { font-family: -apple-system, system-ui, sans-serif; background: #0f1117; color: #e5e7eb; min-height: 100vh; }
+.header { background: #1a1d27; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #2d3148; }
+.header h1 { font-size: 20px; font-weight: 600; color: #f9fafb; }
+.header .btn-group { display: flex; gap: 8px; }
+.header .back-btn { background: transparent; border: 1px solid #2d3148; color: #d1d5db; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; text-decoration: none; display: inline-block; }
+.header .back-btn:hover { background: #252836; border-color: #6366f1; }
+/* Search bar */
+.search-bar { display: flex; gap: 8px; margin: 16px 24px; align-items: center; flex-wrap: wrap; }
+.search-bar input { flex: 1; min-width: 200px; padding: 9px 12px; background: #1a1d27; border: 1px solid #2d3148; border-radius: 8px; color: #e5e7eb; font-size: 14px; }
+.search-bar input:focus { border-color: #6366f1; outline: none; }
+.search-bar select { padding: 8px 10px; background: #1a1d27; border: 1px solid #2d3148; border-radius: 8px; color: #e5e7eb; font-size: 13px; }
+.search-bar .search-btn { background: #6366f1; color: #fff; border: none; padding: 9px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; }
+.search-bar .search-btn:hover { background: #818cf8; }
+/* Results */
+.results-summary { padding: 0 24px 12px; font-size: 13px; color: #9ca3af; }
+.result-card { background: #1a1d27; border: 1px solid #2d3148; border-radius: 8px; padding: 12px 16px; margin: 6px 24px; display: flex; gap: 12px; align-items: flex-start; transition: border-color .15s; }
+.result-card:hover { border-color: #6366f1; }
+.result-icon { font-size: 20px; flex-shrink: 0; margin-top: 2px; }
+.result-body { flex: 1; min-width: 0; }
+.result-title { color: #f9fafb; font-size: 14px; font-weight: 500; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.result-url { color: #6b7280; font-size: 11px; font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
+.result-meta { display: flex; gap: 12px; font-size: 11px; color: #9ca3af; margin-top: 4px; }
+.result-stream { background: #0f1117; border: 1px solid #2d3148; border-radius: 4px; padding: 2px 8px; font-size: 11px; font-family: monospace; color: #4ade80; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
+.pagination { display: flex; gap: 6px; justify-content: center; padding: 16px; }
+.pagination button { background: #1a1d27; border: 1px solid #2d3148; color: #d1d5db; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.pagination button:hover { background: #252836; border-color: #6366f1; }
+.pagination button.active { background: #6366f1; color: #fff; border-color: #6366f1; }
+.pagination button:disabled { opacity: 0.4; cursor: default; }
+.result-img-grid { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+.result-img-grid img { width: 60px; height: 60px; object-fit: cover; border-radius: 4px; border: 1px solid #2d3148; }
+.result-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.result-del-btn { background: transparent; color: #6b7280; border: none; cursor: pointer; font-size: 16px; padding: 4px; line-height: 1; transition: color .15s; }
+.result-del-btn:hover { color: #f87171; }
+.empty-search { text-align: center; padding: 60px 20px; color: #6b7280; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>📊 资源浏览</h1>
+  <div class="btn-group">
+    <a class="back-btn" href="index.html">← 返回站点管理</a>
+  </div>
+</div>
+
+<!-- Search Bar -->
+<div class="search-bar" id="searchBar">
+  <input id="searchQuery" placeholder="搜索标题或流地址..." onkeydown="if(event.key==='Enter')doSearch(0)" />
+  <select id="searchSite"><option value="">全部站点</option></select>
+  <select id="searchType">
+    <option value="">全部类型</option>
+    <option value="video">🎬 视频</option>
+    <option value="art">🖼️ 图片</option>
+    <option value="novel">📄 小说</option>
+  </select>
+  <button class="search-btn" onclick="doSearch(0)">🔍 搜索</button>
+</div>
+
+<div class="results-summary" id="resultsSummary" style="display:none"></div>
+<div id="resultsList"></div>
+<div class="pagination" id="resultsPager" style="display:none"></div>
+<div class="empty-search" id="emptySearch" style="display:none">暂无爬取数据，请先在站点管理页面执行爬取任务</div>
+
+<script>
+let _searchOffset = 0;
+let _searchLimit = 50;
+let _sites = [];
+
+function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;').replace(/"/g,'&quot;'); }
+
+/* ── 加载站点列表（用于站点筛选下拉）─── */
+async function loadSites() {
+  try {
+    const resp = await fetch('/api/sites');
+    _sites = await resp.json();
+    const sel = document.getElementById('searchSite');
+    sel.innerHTML = '<option value="">全部站点</option>' +
+      _sites.map(s => `<option value="${esc(s.key)}">${esc(s.name)}</option>`).join('');
+  } catch (e) {
+    console.warn('加载站点列表失败:', e.message);
+  }
+}
+
+/* ── 搜索 ─────────────────────────────────── */
+async function doSearch(offset) {
+  _searchOffset = offset || 0;
+  const q = document.getElementById('searchQuery').value.trim();
+  const site = document.getElementById('searchSite').value;
+  const rtype = document.getElementById('searchType').value;
+
+  const params = new URLSearchParams({
+    q, site, type: rtype,
+    offset: _searchOffset, limit: _searchLimit,
+  });
+
+  try {
+    const resp = await fetch('/api/search?' + params);
+    const data = await resp.json();
+
+    if (!data.ok) {
+      document.getElementById('resultsList').innerHTML =
+        `<div class="empty-search">❌ 搜索失败: ${esc(data.error || '')}</div>`;
+      return;
+    }
+
+    renderResults(data);
+  } catch (e) {
+    document.getElementById('resultsList').innerHTML =
+      `<div class="empty-search">❌ 请求失败: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderResults(data) {
+  const { results, total, offset, limit } = data;
+  const summary = document.getElementById('resultsSummary');
+  const list = document.getElementById('resultsList');
+  const pager = document.getElementById('resultsPager');
+  const empty = document.getElementById('emptySearch');
+
+  if (total > 0) {
+    summary.style.display = 'block';
+    summary.textContent = `共 ${total} 条结果，显示 ${offset + 1}-${Math.min(offset + limit, total)}`;
+  } else {
+    summary.style.display = 'none';
+  }
+
+  if (!results || !results.length) {
+    list.innerHTML = '';
+    pager.style.display = 'none';
+    const q = document.getElementById('searchQuery').value.trim();
+    empty.textContent = q ? `未找到匹配"${q}"的结果` : '暂无爬取数据，请先在站点管理页面执行爬取任务';
+    empty.style.display = 'block';
+    return;
+  }
+
+  empty.style.display = 'none';
+
+  list.innerHTML = results.map(r => {
+    const icon = r.resource_type === 'video' ? '🎬' : r.resource_type === 'art' ? '🖼️' : '📄';
+    const siteLabel = `<span style="color:#6366f1">${esc(r.site_key || '')}</span>`;
+
+    let streamHtml = '';
+    if (r.stream_url) {
+      streamHtml = `<div class="result-stream" title="${esc(r.stream_url)}">${esc(r.stream_url).substring(0, 80)}</div>`;
+    }
+
+    let imgHtml = '';
+    if (r.images && r.images.length) {
+      const thumbs = r.images.slice(0, 5).map(u => `<img src="${esc(u)}" loading="lazy" />`).join('');
+      imgHtml = `<div class="result-img-grid">${thumbs}</div>`;
+    }
+
+    return `<div class="result-card">
+      <div class="result-icon">${icon}</div>
+      <div class="result-body">
+        <div class="result-title" title="${esc(r.title)}">${esc(r.title) || '(无标题)'}</div>
+        ${r.detail_url ? `<div class="result-url" title="${esc(r.detail_url)}">${siteLabel} ${esc(r.detail_url).substring(0, 60)}</div>` : ''}
+        ${streamHtml}
+        ${imgHtml}
+        <div class="result-meta">
+          <span>${esc(r.group_name || '')}</span>
+          <span>${esc(r.crawled_at || '').substring(0, 19)}</span>
+        </div>
+      </div>
+      <div class="result-actions">
+        <button class="result-del-btn" onclick="deleteResult(${r.id})" title="删除">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  // 分页
+  if (total > _searchLimit) {
+    pager.style.display = 'flex';
+    const totalPages = Math.ceil(total / _searchLimit);
+    const curPage = Math.floor(_searchOffset / _searchLimit);
+    let html = '';
+    if (curPage > 0) {
+      html += `<button onclick="doSearch(${(curPage - 1) * _searchLimit})">← 上一页</button>`;
+    }
+    const startPage = Math.max(0, curPage - 4);
+    const endPage = Math.min(totalPages, startPage + 10);
+    for (let i = startPage; i < endPage; i++) {
+      html += `<button class="${i === curPage ? 'active' : ''}" onclick="doSearch(${i * _searchLimit})">${i + 1}</button>`;
+    }
+    if (curPage < totalPages - 1) {
+      html += `<button onclick="doSearch(${(curPage + 1) * _searchLimit})">下一页 →</button>`;
+    }
+    pager.innerHTML = html;
+  } else {
+    pager.style.display = 'none';
+  }
+}
+
+async function deleteResult(id) {
+  if (!confirm('确定删除该结果？')) return;
+  const resp = await fetch('/api/results/' + id, { method: 'DELETE' });
+  const data = await resp.json();
+  if (data.ok) {
+    doSearch(_searchOffset);
+  }
+}
+
+/* ── 初始化：加载站点列表 + 自动搜索全部 ── */
+loadSites().then(() => doSearch(0));
+</script>
+</body>
+</html>

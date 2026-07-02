@@ -98,7 +98,7 @@ def api_delete_site(key: str):
 
 @app.route("/api/wizard/start", methods=["POST"])
 def api_wizard_start():
-    data = request.get_json(force=True)
+    data = request.get_json(silent=True) or {}
     key = data.get("key", "").strip()
     name = data.get("name", "").strip()
     base_url = data.get("base_url", "").strip()
@@ -318,7 +318,7 @@ def wizard_har_page():
 def api_har_start():
     global _har_wizard, _har_client
 
-    data = request.get_json(force=True)
+    data = request.get_json(silent=True) or {}
     url = data.get("url", "").strip()
     log.info("HAR录制启动请求: url=%s", url)
     # URL 可以为空（复用已有会话时不需要 URL）
@@ -424,7 +424,7 @@ def api_har_generate():
     try:
         from crawler.config_wizard_har import ConfigGenerator
 
-        data = request.get_json(force=True) if request.is_json else {}
+        data = request.get_json(silent=True) or {} if request.is_json else {}
         group_name = data.get("group_name", "").strip()
         resource_type = data.get("resource_type", "video").strip()
         mode = data.get("mode", "").strip()
@@ -470,7 +470,7 @@ def api_har_generate():
 @app.route("/api/sites/<key>/groups/<group_name>/entries", methods=["POST"])
 def api_add_entry(key: str, group_name: str):
     """向指定分组添加同模式入口 URL。"""
-    data = request.get_json(force=True)
+    data = request.get_json(silent=True) or {}
     url = data.get("url", "").strip()
     entry_name = data.get("name", "").strip()
 
@@ -558,6 +558,226 @@ def api_delete_entry(key: str, group_name: str, entry_index: int):
     return jsonify({"ok": True, "removed": removed})
 
 
+# ── 引导式向导 API ───────────────────────────────────
+
+_guided_wizard = None  # GuidedWizard 实例
+_guided_session_id = None  # 当前活跃的 session ID
+
+
+def _get_guided_wizard():
+    """获取或创建 GuidedWizard 实例（复用持久化 session）。"""
+    global _guided_wizard
+    if _guided_wizard is None:
+        from crawler.browser_act import BrowserActClient
+        from crawler.guided_wizard import GuidedWizard
+        client = BrowserActClient(session="guided_wizard", browser_id="direct_local_100797252049567848")
+        _guided_wizard = GuidedWizard(client)
+        log.info("引导式向导实例已创建")
+    return _guided_wizard
+
+
+@app.route("/wizard_guided")
+def wizard_guided_page():
+    return render_template("wizard_guided.html")
+
+
+@app.route("/api/guided/start", methods=["POST"])
+def api_guided_start():
+    """开始引导: 创建 session + 导航到起始 URL。"""
+    global _guided_session_id
+    data = request.get_json(silent=True) or {}
+    site_name = data.get("site_name", "").strip()
+    start_url = data.get("start_url", "").strip()
+
+    if not start_url:
+        return jsonify({"ok": False, "error": "请输入网站 URL"}), 400
+
+    if not site_name:
+        site_name = start_url.replace("https://", "").replace("http://", "").split("/")[0]
+
+    try:
+        wizard = _get_guided_wizard()
+        session = wizard.start(site_name, start_url)
+        _guided_session_id = session.session_id
+        log.info("引导启动成功: session_id=%s site_name=%s", session.session_id, site_name)
+        return jsonify(session_to_dict(session))
+    except Exception as e:
+        log.error("引导启动失败: %s", e, exc_info=True)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/guided/status", methods=["GET"])
+def api_guided_status():
+    """获取当前引导状态。"""
+    if not _guided_session_id:
+        return jsonify({"ok": False, "error": "没有进行中的引导会话"})
+
+    try:
+        wizard = _get_guided_wizard()
+        return jsonify(wizard.get_status(_guided_session_id))
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)})
+    except Exception as e:
+        log.error("获取状态失败: %s", e, exc_info=True)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/guided/pagination/start", methods=["POST"])
+def api_guided_pagination_start():
+    """开始翻页检测: 记录当前 URL。"""
+    if not _guided_session_id:
+        return jsonify({"ok": False, "error": "没有进行中的引导会话"})
+
+    try:
+        wizard = _get_guided_wizard()
+        result = wizard.start_pagination_detect(_guided_session_id)
+        log.info("翻页检测开始: url_before=%s", result.get("url_before", ""))
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)})
+    except Exception as e:
+        log.error("翻页检测开始失败: %s", e, exc_info=True)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/guided/pagination/end", methods=["POST"])
+def api_guided_pagination_end():
+    """结束翻页检测: 获取当前 URL + 对比识别翻页模式。"""
+    if not _guided_session_id:
+        return jsonify({"ok": False, "error": "没有进行中的引导会话"})
+
+    try:
+        wizard = _get_guided_wizard()
+        result = wizard.end_pagination_detect(_guided_session_id)
+        log.info("翻页检测结束: ok=%s", result.get("ok"))
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)})
+    except Exception as e:
+        log.error("翻页检测结束失败: %s", e, exc_info=True)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/guided/path/add", methods=["POST"])
+def api_guided_path_add():
+    """添加路径: 获取当前 URL → 泛化 → 添加新 Level。"""
+    if not _guided_session_id:
+        return jsonify({"ok": False, "error": "没有进行中的引导会话"})
+
+    try:
+        wizard = _get_guided_wizard()
+        result = wizard.add_path(_guided_session_id)
+        log.info("添加路径: ok=%s level=%s", result.get("ok"), result.get("level", ""))
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)})
+    except Exception as e:
+        log.error("添加路径失败: %s", e, exc_info=True)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/guided/path/update", methods=["POST"])
+def api_guided_path_update():
+    """编辑某个 Level 的 path_pattern。"""
+    if not _guided_session_id:
+        return jsonify({"ok": False, "error": "没有进行中的引导会话"})
+
+    data = request.get_json(silent=True) or {}
+    level = data.get("level")
+    new_pattern = data.get("path_pattern", "").strip()
+
+    if level is None or not new_pattern:
+        return jsonify({"ok": False, "error": "参数不完整"}), 400
+
+    try:
+        wizard = _get_guided_wizard()
+        result = wizard.update_path_pattern(_guided_session_id, int(level), new_pattern)
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)})
+    except Exception as e:
+        log.error("更新路径模式失败: %s", e, exc_info=True)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/guided/resource/detect", methods=["POST"])
+def api_guided_resource_detect():
+    """检测资源: 获取网络请求中的 m3u8/mp4/flv/ts。"""
+    if not _guided_session_id:
+        return jsonify({"ok": False, "error": "没有进行中的引导会话"})
+
+    try:
+        wizard = _get_guided_wizard()
+        result = wizard.detect_resource(_guided_session_id)
+        log.info("资源检测: ok=%s resources=%d", result.get("ok"), len(result.get("resources", [])))
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)})
+    except Exception as e:
+        log.error("资源检测失败: %s", e, exc_info=True)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/guided/complete", methods=["POST"])
+def api_guided_complete():
+    """完成引导: 生成配置 + 写入 sites.json。"""
+    global _guided_session_id
+    if not _guided_session_id:
+        return jsonify({"ok": False, "error": "没有进行中的引导会话"})
+
+    data = request.get_json(silent=True) or {}
+    site_name = data.get("site_name", "").strip()
+
+    try:
+        wizard = _get_guided_wizard()
+        result = wizard.complete(_guided_session_id, site_name=site_name)
+        if result.get("ok"):
+            _guided_session_id = None
+            log.info("引导完成: site_key=%s", result.get("site_key"))
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)})
+    except Exception as e:
+        log.error("引导完成失败: %s", e, exc_info=True)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/guided/cancel", methods=["POST"])
+def api_guided_cancel():
+    """取消引导: 清理 session。"""
+    global _guided_session_id
+    if not _guided_session_id:
+        return jsonify({"ok": False, "error": "没有进行中的引导会话"})
+
+    try:
+        wizard = _get_guided_wizard()
+        result = wizard.cancel(_guided_session_id)
+        _guided_session_id = None
+        log.info("引导已取消")
+        return jsonify(result)
+    except ValueError:
+        _guided_session_id = None
+        return jsonify({"ok": True, "message": "引导已取消"})
+    except Exception:
+        _guided_session_id = None
+        return jsonify({"ok": True, "message": "引导已取消"})
+
+
+def session_to_dict(session) -> dict:
+    """将 GuidedSession 转为前端可用的 dict。"""
+    return {
+        "ok": True,
+        "session_id": session.session_id,
+        "site_name": session.site_name,
+        "start_url": session.start_url,
+        "current_url": session.current_url,
+        "levels": [lv.to_dict() for lv in session.levels],
+        "pagination": session.pagination.to_dict() if session.pagination else None,
+        "pagination_detecting": session.pagination_detecting,
+        "resource_detected": session.resource_detected,
+    }
+
+
 # ── Auto Analyze API ────────────────────────────────
 
 _analyze_result_cache = {}  # url -> {config, json_str}
@@ -637,7 +857,7 @@ def api_analyze():
 @app.route("/api/analyze/save", methods=["POST"])
 def api_analyze_save():
     """保存自动分析结果到 sites.json。"""
-    data = request.get_json(force=True)
+    data = request.get_json(silent=True) or {}
     url = data.get("url", "").strip()
     is_homepage = data.get("is_homepage", True)
     cache_key = (url, is_homepage)

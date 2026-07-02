@@ -1,8 +1,9 @@
-__pycache__/
+﻿__pycache__/
 *.pyc
 *.pyo
 tmp/
 log/
 out/
+data/
 __pycache__/
 __pycache__/
