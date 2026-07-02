@@ -64,6 +64,15 @@ REG-Paper/
     └── ligo_results.png    # LIGO echo search results
 ```
 
+## &#128279; DOI / Zenodo | 数字对象标识符
+
+| Theory | Zenodo Record | DOI |
+|:------:|:--------------:|:---:|
+| **ESE** (Emergent Structural Emerulation) | [zenodo.org/records/21111987](https://zenodo.org/records/21111987) | [10.5281/zenodo.21111987](https://doi.org/10.5281/zenodo.21111987) |
+| **REG** (Relational Emergent Gravity) | [zenodo.org/records/21071504](https://zenodo.org/records/21071504) | [10.5281/zenodo.21071504](https://doi.org/10.5281/zenodo.21071504) |
+
+---
+
 ## &#128218; Papers | 论文
 
 | Version | Format | File |
