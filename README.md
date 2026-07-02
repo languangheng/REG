@@ -68,7 +68,7 @@ REG-Paper/
 
 | Theory | Zenodo Record | DOI |
 |:------:|:--------------:|:---:|
-| **ESE** (Emergent Structural Emerulation) | [zenodo.org/records/21111987](https://zenodo.org/records/21111987) | [10.5281/zenodo.21111987](https://doi.org/10.5281/zenodo.21111987) |
+| **ESE** (Emergent Structural Emerulation) | [https://zenodo.org/records/21137141](https://zenodo.org/records/21137141) | [10.5281/zenodo.21137140](https://zenodo.org/records/21137141) |
 | **REG** (Relational Emergent Gravity) | [zenodo.org/records/21071504](https://zenodo.org/records/21071504) | [10.5281/zenodo.21071504](https://doi.org/10.5281/zenodo.21071504) |
 
 ---
