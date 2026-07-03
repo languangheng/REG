@@ -68,7 +68,7 @@ REG-Paper/
 
 | Theory | Zenodo Record | DOI |
 |:------:|:--------------:|:---:|
-| **ESE** (Emergent Structural Emerulation) | [https://zenodo.org/records/21137141](https://zenodo.org/records/21137141) | [10.5281/zenodo.21137140](https://zenodo.org/records/21137141) |
+| **ESE** (Emergent Structural Emerulation) | [https://zenodo.org/records/21174705](https://zenodo.org/records/21174705) | [10.5281/zenodo.21174704](https://zenodo.org/records/21174705) |
 | **REG** (Relational Emergent Gravity) | [zenodo.org/records/21071504](https://zenodo.org/records/21071504) | [10.5281/zenodo.21071504](https://doi.org/10.5281/zenodo.21071504) |
 ---
  
@@ -98,12 +98,7 @@ legal evidence of creation time and content integrity.
 ```
 
 ## &#9881; Getting Started | 快速开始
-
-### 1. View the Paper | 查看论文
-
-Open in browser: **[paper/zh/README.html](paper/zh/README.html)** (English)
-or **[paper/zh/README_zh.html](paper/zh/README_zh.html)** (Chinese)
-
+ 
 ### 2. Run the BRN Simulation | 运行BRN模拟
 
 ```bash
